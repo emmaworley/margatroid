@@ -1,0 +1,3 @@
+[workspace]
+members = ["bridge", "orchestrator", "tui", "daemon", "boot", "cleanup"]
+resolver = "2"

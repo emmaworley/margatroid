@@ -1,0 +1,13 @@
+[package]
+name = "orchestrator-cleanup"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "orchestrator-cleanup"
+path = "src/main.rs"
+
+[dependencies]
+orchestrator = { path = "../orchestrator" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
