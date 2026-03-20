@@ -52,7 +52,46 @@ orchestrator (lib)          bridge (lib)
      └── daemon ─────────────────┘
 ```
 
-## Building
+## Prerequisites
+
+- **Rust** (stable toolchain)
+- **Podman** (rootless, for container management)
+- **tmux** (for session multiplexing)
+- **Git**
+- **Claude Code** credentials at `~/.claude/.credentials.json` and `~/.claude.json`
+
+## Installation
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/emmaworley/margatroid/main/install.sh | bash
+```
+
+This clones the repo to `~/.margatroid`, builds from source, installs binaries to `~/bin/`, and enables systemd user services.
+
+### What gets installed
+
+```
+~/bin/orchestrator-{boot,daemon,tui,cleanup}     # Binaries
+~/.config/systemd/user/claude-tmux.service        # Session manager service
+~/.config/systemd/user/claude-daemon.service      # Bridge daemon service
+~/.config/systemd/user/margatroid-update.{service,timer}  # Auto-update
+```
+
+### Updates
+
+Updates happen automatically:
+- **On daemon start/restart** — pulls and rebuilds if there are new commits
+- **Hourly timer** — checks for updates in the background, rebuilds and restarts the daemon if needed
+
+Running sessions are not disrupted by updates. Container sessions live in tmux and are independent of the daemon process.
+
+To update manually:
+
+```sh
+~/.margatroid/install.sh
+```
+
+## Building from source
 
 ```sh
 cargo build --release
@@ -63,34 +102,6 @@ Binaries are produced in `target/release/`:
 - `orchestrator-daemon`
 - `orchestrator-tui`
 - `orchestrator-cleanup`
-
-## Installation
-
-Copy binaries to `~/bin/`:
-
-```sh
-for bin in boot daemon tui cleanup; do
-  cp target/release/orchestrator-$bin ~/bin/
-done
-```
-
-Install systemd services (user mode):
-
-```sh
-mkdir -p ~/.config/systemd/user
-cp systemd/claude-tmux.service ~/.config/systemd/user/
-cp systemd/claude-daemon.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now claude-tmux.service
-systemctl --user enable --now claude-daemon.service
-```
-
-## Prerequisites
-
-- **Rust** (stable toolchain)
-- **Podman** (rootless, for container management)
-- **tmux** (for session multiplexing)
-- **Claude Code** credentials at `~/.claude/.credentials.json` and `~/.claude.json`
 
 ## Session Lifecycle
 
@@ -165,7 +176,11 @@ Creates the shared tmux session and restores saved sessions. Runs as a user serv
 
 ### claude-daemon.service
 
-Polls the bridge API for work and manages remote control sessions. Depends on `claude-tmux.service`. Automatically restarts on failure.
+Polls the bridge API for work and manages remote control sessions. Depends on `claude-tmux.service`. Checks for updates on start. Automatically restarts on failure.
+
+### margatroid-update.timer
+
+Checks for updates hourly. On new commits: pulls, rebuilds, and restarts the daemon. Running sessions are unaffected.
 
 ## Development
 

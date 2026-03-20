@@ -1,0 +1,10 @@
+[Unit]
+Description=Margatroid Auto-Update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.cargo/bin:%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.margatroid/install.sh
+TimeoutStartSec=600

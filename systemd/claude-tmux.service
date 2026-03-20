@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-Environment=PATH=%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=%h/.cargo/bin:%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=%h/bin/orchestrator-boot
 ExecStop=/usr/bin/tmux kill-session -t claude
 Restart=always
