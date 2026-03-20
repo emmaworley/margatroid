@@ -51,8 +51,12 @@ pub fn record_usage(image: &str) -> std::io::Result<()> {
     mru.truncate(MAX_MRU);
 
     let content = serde_json::to_string_pretty(&mru)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    fs::write(&path, content)?;
+        .map_err(std::io::Error::other)?;
+
+    // Atomic write via tmp+rename to avoid corruption on crash
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, content)?;
+    fs::rename(&tmp, &path)?;
     Ok(())
 }
 

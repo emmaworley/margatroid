@@ -6,8 +6,6 @@ use std::process::Command;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PodmanError {
-    #[error("podman command failed: {0}")]
-    Command(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -126,5 +124,74 @@ pub fn inspect_id(name: &str) -> Option<String> {
         }
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn build_run_command_has_correct_container_name() {
+        let session_dir = PathBuf::from("/home/claude/sessions/test-session");
+        let cmd = build_run_command("test-session", "ubuntu:latest", &session_dir, &[]);
+        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+
+        assert!(args.contains(&"--name=claude-test-session".to_string()));
+    }
+
+    #[test]
+    fn build_run_command_has_workdir() {
+        let session_dir = PathBuf::from("/home/claude/sessions/myproj");
+        let cmd = build_run_command("myproj", "debian", &session_dir, &[]);
+        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+
+        assert!(args.contains(&"-w=/home/claude/sessions/myproj".to_string()));
+    }
+
+    #[test]
+    fn build_run_command_passes_claude_args() {
+        let session_dir = PathBuf::from("/home/claude/sessions/test");
+        let claude_args = vec!["--name".to_string(), "my-session".to_string()];
+        let cmd = build_run_command("test", "ubuntu", &session_dir, &claude_args);
+        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+
+        assert!(args.contains(&"--name".to_string()));
+        assert!(args.contains(&"my-session".to_string()));
+    }
+
+    #[test]
+    fn build_run_command_has_bind_mounts() {
+        let session_dir = PathBuf::from("/home/claude/sessions/test");
+        let cmd = build_run_command("test", "ubuntu", &session_dir, &[]);
+        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+
+        // Should have session dir mount
+        let has_session_mount = args.iter().any(|a| {
+            a.contains("/home/claude/sessions/test") && a.starts_with("-v=")
+        });
+        assert!(has_session_mount, "missing session dir bind mount");
+    }
+
+    #[test]
+    fn build_run_command_sets_env_vars() {
+        let session_dir = PathBuf::from("/tmp/sessions/test");
+        let cmd = build_run_command("test", "ubuntu", &session_dir, &[]);
+        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+
+        // Check environment variables are set
+        assert!(args.contains(&"HOME=/home/claude".to_string()));
+        assert!(args.contains(&"DISABLE_AUTOUPDATER=1".to_string()));
+    }
+
+    #[test]
+    fn build_run_command_uses_entrypoint() {
+        let session_dir = PathBuf::from("/tmp/sessions/test");
+        let cmd = build_run_command("test", "ubuntu", &session_dir, &[]);
+        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+
+        let ep_idx = args.iter().position(|a| a == "--entrypoint").unwrap();
+        assert_eq!(args[ep_idx + 1], "/home/claude/.local/bin/claude");
     }
 }

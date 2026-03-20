@@ -2,6 +2,7 @@
 
 use crate::app::{App, RunResult, View};
 use crossterm::event::KeyCode;
+use orchestrator::image::is_valid_session_name;
 use ratatui::prelude::*;
 use ratatui::widgets::*;
 
@@ -183,8 +184,7 @@ pub fn handle_key_name(app: &mut App, key: KeyCode) -> Option<RunResult> {
         }
         KeyCode::Enter => {
             let name = app.name_buf.trim().to_string();
-            if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_')
-            {
+            if is_valid_session_name(&name) {
                 return Some(RunResult::Launch {
                     name,
                     image: app.selected_image.clone(),

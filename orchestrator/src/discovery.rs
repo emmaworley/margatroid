@@ -138,20 +138,13 @@ pub fn slugify(path: &Path) -> String {
 fn read_tail(path: &Path, n: u64) -> Option<String> {
     let mut file = fs::File::open(path).ok()?;
     let len = file.metadata().ok()?.len();
-    let start = if len > n { len - n } else { 0 };
+    let start = len.saturating_sub(n);
     file.seek(SeekFrom::Start(start)).ok()?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).ok()?;
-    // If we seeked into the middle, skip bytes until we find a valid UTF-8 boundary
-    if start > 0 {
-        let skip = match std::str::from_utf8(&bytes) {
-            Ok(_) => 0,
-            Err(e) => e.valid_up_to() + e.error_len().unwrap_or(1),
-        };
-        Some(String::from_utf8_lossy(&bytes[skip..]).into_owned())
-    } else {
-        Some(String::from_utf8_lossy(&bytes).into_owned())
-    }
+    // If we seeked into the middle of a multi-byte UTF-8 char, lossy conversion
+    // replaces the leading fragment with U+FFFD, which is harmless for JSONL parsing.
+    Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 #[cfg(test)]

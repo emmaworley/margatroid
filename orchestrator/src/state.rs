@@ -64,13 +64,18 @@ where
     if let Some(parent) = lf.parent() {
         fs::create_dir_all(parent)?;
     }
+
+    // Open with O_CLOEXEC so the lock FD isn't inherited by child processes (fork).
+    use std::os::unix::fs::OpenOptionsExt;
     let file = fs::OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(false)
+        .custom_flags(libc::O_CLOEXEC)
         .open(&lf)?;
 
-    // Use libc flock directly for simplicity
+    // Use flock for exclusive locking. O_CLOEXEC above ensures the FD
+    // won't leak into child processes created by fork().
     use std::os::unix::io::AsRawFd;
     let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
     if ret != 0 {
@@ -80,10 +85,8 @@ where
         )));
     }
 
-    let result = f();
-
     // Lock released when `file` drops
-    result
+    f()
 }
 
 /// Register a session (creates or updates). Holds flock.

@@ -53,7 +53,7 @@ pub fn handle_command(input: &str) -> String {
             } else if !is_valid_session_name(parts[1]) {
                 "Invalid name: use only letters, numbers, hyphens, underscores.".to_string()
             } else {
-                let remove_data = parts.iter().any(|p| *p == "--data");
+                let remove_data = parts.contains(&"--data");
                 cmd_delete(parts[1], remove_data)
             }
         }
@@ -228,4 +228,117 @@ fn help_text() -> String {
      | `/images` | Show recent images |\n\
      | `/help` | Show this help |"
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn help_command() {
+        let result = handle_command("/help");
+        assert!(result.contains("Orchestrator Commands"));
+        assert!(result.contains("/list"));
+    }
+
+    #[test]
+    fn help_with_question_mark() {
+        let result = handle_command("?");
+        assert!(result.contains("Orchestrator Commands"));
+    }
+
+    #[test]
+    fn empty_input_shows_help() {
+        let result = handle_command("");
+        assert!(result.contains("Orchestrator Commands"));
+    }
+
+    #[test]
+    fn unknown_command() {
+        let result = handle_command("/foobar");
+        assert!(result.contains("Unknown command"));
+        assert!(result.contains("/foobar"));
+    }
+
+    #[test]
+    fn start_missing_name() {
+        let result = handle_command("/start");
+        assert!(result.contains("Usage:"));
+    }
+
+    #[test]
+    fn start_invalid_name() {
+        let result = handle_command("/start bad;name");
+        assert!(result.contains("Invalid name"));
+    }
+
+    #[test]
+    fn start_with_special_chars() {
+        let result = handle_command("/start ../escape");
+        assert!(result.contains("Invalid name"));
+    }
+
+    #[test]
+    fn stop_missing_name() {
+        let result = handle_command("/stop");
+        assert!(result.contains("Usage:"));
+    }
+
+    #[test]
+    fn stop_invalid_name() {
+        let result = handle_command("/stop bad;name");
+        assert!(result.contains("Invalid name"));
+    }
+
+    #[test]
+    fn restart_missing_name() {
+        let result = handle_command("/restart");
+        assert!(result.contains("Usage:"));
+    }
+
+    #[test]
+    fn delete_missing_name() {
+        let result = handle_command("/delete");
+        assert!(result.contains("Usage:"));
+    }
+
+    #[test]
+    fn delete_invalid_name() {
+        let result = handle_command("/delete path/traversal");
+        assert!(result.contains("Invalid name"));
+    }
+
+    #[test]
+    fn info_missing_name() {
+        let result = handle_command("/info");
+        assert!(result.contains("Usage:"));
+    }
+
+    #[test]
+    fn info_invalid_name() {
+        let result = handle_command("/info semi;colon");
+        assert!(result.contains("Invalid name"));
+    }
+
+    #[test]
+    fn command_without_slash_prefix() {
+        let result = handle_command("help");
+        assert!(result.contains("Orchestrator Commands"));
+    }
+
+    #[test]
+    fn command_case_insensitive() {
+        let result = handle_command("/HELP");
+        assert!(result.contains("Orchestrator Commands"));
+
+        let result2 = handle_command("/List");
+        // /list will try to list sessions, not return "Unknown command"
+        assert!(!result2.contains("Unknown command"));
+    }
+
+    #[test]
+    fn whitespace_trimmed() {
+        let result = handle_command("  /help  ");
+        assert!(result.contains("Orchestrator Commands"));
+    }
 }

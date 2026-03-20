@@ -80,65 +80,77 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut last_refresh = std::time::Instant::now();
 
-    let result = loop {
-        terminal.draw(|f| draw(&app, f))?;
+    loop {
+        let result = loop {
+            terminal.draw(|f| draw(&app, f))?;
 
-        // Auto-refresh session list every 3 seconds
-        if last_refresh.elapsed() >= std::time::Duration::from_secs(3)
-            && app.view == View::SessionList
-        {
-            let old_cursor = app.cursor;
-            app.refresh_sessions();
-            app.cursor = old_cursor.min(app.sessions.len().saturating_sub(1));
-            last_refresh = std::time::Instant::now();
-        }
+            // Auto-refresh session list every 3 seconds
+            if last_refresh.elapsed() >= std::time::Duration::from_secs(3)
+                && app.view == View::SessionList
+            {
+                let old_cursor = app.cursor;
+                app.refresh_sessions();
+                app.cursor = old_cursor.min(app.sessions.len().saturating_sub(1));
+                last_refresh = std::time::Instant::now();
+            }
 
-        // Poll with 1s timeout so we can auto-refresh even without input
-        if !event::poll(std::time::Duration::from_secs(1))? {
-            continue;
-        }
-
-        if let Event::Key(key) = event::read()? {
-            if key.kind != KeyEventKind::Press {
+            // Poll with 1s timeout so we can auto-refresh even without input
+            if !event::poll(std::time::Duration::from_secs(1))? {
                 continue;
             }
 
-            match handle_key(&mut app, key.code) {
-                Some(RunResult::Quit) => break RunResult::Quit,
-                Some(RunResult::Launch { name, image }) => {
-                    break RunResult::Launch { name, image };
+            if let Event::Key(key) = event::read()? {
+                if key.kind != KeyEventKind::Press {
+                    continue;
                 }
-                None => {}
+
+                match handle_key(&mut app, key.code) {
+                    Some(RunResult::Quit) => break RunResult::Quit,
+                    Some(RunResult::Launch { name, image }) => {
+                        break RunResult::Launch { name, image };
+                    }
+                    None => {}
+                }
             }
-        }
-    };
+        };
 
-    // Restore terminal
-    disable_raw_mode()?;
-    execute!(stdout(), LeaveAlternateScreen)?;
-
-    match result {
-        RunResult::Quit => Ok(()),
-        RunResult::Launch { name, image } => {
-            // Setup session and launch in a new tmux window.
-            // The manager pane stays alive — sessions always open in their own pane.
-            if let Err(e) = session::setup(&name) {
-                return Err(format!("Setup failed: {e}").into());
+        match result {
+            RunResult::Quit => {
+                // Restore terminal
+                disable_raw_mode()?;
+                execute!(stdout(), LeaveAlternateScreen)?;
+                return Ok(());
             }
-            if let Err(e) = orchestrator::state::register(&name, &image) {
-                return Err(format!("Registration failed: {e}").into());
+            RunResult::Launch { name, image } => {
+                // Setup session and launch in a new tmux window.
+                // The manager pane stays alive — sessions always open in their own pane.
+                if let Err(e) = session::setup(&name) {
+                    disable_raw_mode()?;
+                    execute!(stdout(), LeaveAlternateScreen)?;
+                    return Err(format!("Setup failed: {e}").into());
+                }
+                if let Err(e) = orchestrator::state::register(&name, &image) {
+                    disable_raw_mode()?;
+                    execute!(stdout(), LeaveAlternateScreen)?;
+                    return Err(format!("Registration failed: {e}").into());
+                }
+                let _ = orchestrator::image::record_usage(&image);
+
+                let home = orchestrator::home_dir();
+                let tui_bin = home.join("bin/orchestrator-tui");
+                let tui_path = tui_bin.to_string_lossy().into_owned();
+
+                if let Err(e) = orchestrator::tmux::new_window(&name, &[&tui_path, &name, &image]) {
+                    disable_raw_mode()?;
+                    execute!(stdout(), LeaveAlternateScreen)?;
+                    return Err(format!("Failed to start: {e}").into());
+                }
+
+                // Refresh and loop back to TUI instead of recursing
+                app.refresh_sessions();
+                app.view = View::SessionList;
+                last_refresh = std::time::Instant::now();
             }
-            let _ = orchestrator::image::record_usage(&image);
-
-            let home = orchestrator::home_dir();
-            let tui_bin = home.join("bin/orchestrator-tui");
-            let tui_path = tui_bin.to_string_lossy().into_owned();
-
-            orchestrator::tmux::new_window(&name, &[&tui_path, &name, &image])
-                .map_err(|e| -> Box<dyn std::error::Error> { format!("Failed to start: {e}").into() })?;
-
-            // Re-enter the TUI loop instead of exiting
-            run()
         }
     }
 }

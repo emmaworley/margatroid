@@ -53,28 +53,14 @@ impl WorkItem {
     /// Decode the base64 `secret` field into a [`WorkSecret`].
     pub fn decode_secret(&self) -> Option<WorkSecret> {
         let secret = self.secret.as_ref()?;
-        // The secret is base64-encoded JSON.
         use base64::Engine;
+        // Try standard (with or without padding), then URL-safe (with or without padding).
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(secret)
-            .ok()
-            .or_else(|| {
-                // Try URL-safe variant
-                base64::engine::general_purpose::URL_SAFE
-                    .decode(secret)
-                    .ok()
-            })
-            .or_else(|| {
-                // Try with padding
-                let padded = match secret.len() % 4 {
-                    2 => format!("{secret}=="),
-                    3 => format!("{secret}="),
-                    _ => secret.clone(),
-                };
-                base64::engine::general_purpose::STANDARD
-                    .decode(&padded)
-                    .ok()
-            })?;
+            .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(secret))
+            .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(secret))
+            .or_else(|_| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(secret))
+            .ok()?;
         serde_json::from_slice(&bytes).ok()
     }
 
@@ -154,7 +140,7 @@ pub struct HeartbeatResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Stream-JSON protocol events (over WebSocket / stdin+stdout)
+// Stream-JSON protocol events (over SSE / stdin+stdout)
 // ---------------------------------------------------------------------------
 
 /// An event in the stream-json protocol.
@@ -311,20 +297,8 @@ impl Event {
         })
     }
 
-    /// Create an assistant text response that references a parent event.
-    pub fn assistant_text_reply(text: &str, _parent_uuid: Option<&str>) -> Self {
-        // Note: real Claude Code does NOT send parentUuid to the server.
-        // That field is local to the CLI's JSONL transcript only.
-        Self::assistant_text(text)
-    }
-
     /// Create a result/success event.
     pub fn result_success(text: &str) -> Self {
-        Self::result_success_reply(text, None)
-    }
-
-    /// Create a result/success event that references a parent event.
-    pub fn result_success_reply(text: &str, _parent_uuid: Option<&str>) -> Self {
         let fields = serde_json::Map::new();
         Event::Result {
             subtype: Some("success".into()),

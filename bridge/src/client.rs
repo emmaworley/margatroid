@@ -13,7 +13,6 @@
 //! | heartbeat         | session_ingress_token (from work secret)      |
 //! | stop              | OAuth access token (with refresh on 401)      |
 //! | create_session    | OAuth access token                           |
-//! | send_session_events | OAuth access token                         |
 //! | deregister        | OAuth access token                           |
 
 use crate::config::BridgeConfig;
@@ -65,12 +64,13 @@ impl BridgeClient {
         &self.config.org_uuid
     }
 
-    pub fn access_token(&self) -> &str {
-        &self.config.access_token
-    }
-
     pub fn base_url(&self) -> &str {
         &self.config.base_url
+    }
+
+    /// Return a reference to the shared HTTP client for reuse (e.g. SSE transport).
+    pub fn http_client(&self) -> &Client {
+        &self.http
     }
 
     // -----------------------------------------------------------------------
@@ -83,7 +83,7 @@ impl BridgeClient {
         let resp = self
             .http
             .post(&url)
-            .headers(self.oauth_headers())
+            .headers(self.full_headers(&self.config.access_token))
             .json(&req)
             .timeout(std::time::Duration::from_secs(15))
             .send()
@@ -114,6 +114,10 @@ impl BridgeClient {
     /// with no work available.
     pub async fn poll_for_work(&self) -> Result<Option<WorkItem>, ClientError> {
         let env_id = self.env_id()?;
+        let env_secret = self
+            .environment_secret
+            .as_deref()
+            .ok_or(ClientError::MissingField("environment_secret (not registered)"))?;
 
         let url = format!(
             "{}/v1/environments/{}/work/poll",
@@ -123,7 +127,7 @@ impl BridgeClient {
         let resp = self
             .http
             .get(&url)
-            .headers(self.env_secret_headers())
+            .headers(self.full_headers(env_secret))
             .timeout(std::time::Duration::from_secs(30))
             .send()
             .await?;
@@ -142,7 +146,14 @@ impl BridgeClient {
 
         match serde_json::from_str::<WorkItem>(&text) {
             Ok(item) => Ok(Some(item)),
-            Err(_) => Ok(None),
+            Err(e) => {
+                tracing::warn!(
+                    err = %e,
+                    body_len = text.len(),
+                    "poll response was non-empty JSON but failed to parse as WorkItem"
+                );
+                Ok(None)
+            }
         }
     }
 
@@ -167,7 +178,7 @@ impl BridgeClient {
         let resp = self
             .http
             .post(&url)
-            .headers(self.headers(session_token))
+            .headers(self.full_headers(session_token))
             .json(&serde_json::json!({}))
             .timeout(std::time::Duration::from_secs(10))
             .send()
@@ -197,7 +208,7 @@ impl BridgeClient {
         let resp = self
             .http
             .post(&url)
-            .headers(self.headers(session_token))
+            .headers(self.full_headers(session_token))
             .json(&serde_json::json!({}))
             .timeout(std::time::Duration::from_secs(10))
             .send()
@@ -227,7 +238,7 @@ impl BridgeClient {
         let resp = self
             .http
             .post(&url)
-            .headers(self.oauth_headers())
+            .headers(self.full_headers(&self.config.access_token))
             .json(&serde_json::json!({ "force": force }))
             .timeout(std::time::Duration::from_secs(10))
             .send()
@@ -258,7 +269,7 @@ impl BridgeClient {
             "source": "remote-control",
         });
 
-        let mut h = self.oauth_headers();
+        let mut h = self.full_headers(&self.config.access_token);
         h.insert("anthropic-beta", HeaderValue::from_static("ccr-byoc-2025-07-29"));
 
         let resp = self
@@ -277,7 +288,6 @@ impl BridgeClient {
         }
 
         let text = resp.text().await?;
-        tracing::debug!(body = %text, "create session response");
         let data: serde_json::Value = serde_json::from_str(&text)
             .map_err(|e| ClientError::Api { status: 0, body: format!("parse: {e}") })?;
 
@@ -286,10 +296,7 @@ impl BridgeClient {
             .and_then(|s| s.get("id"))
             .and_then(|id| id.as_str())
             .or_else(|| data.get("id").and_then(|id| id.as_str()))
-            .ok_or_else(|| {
-                tracing::warn!(response = %text.chars().take(500).collect::<String>(), "no session id found");
-                ClientError::MissingField("id in create session response")
-            })?
+            .ok_or(ClientError::MissingField("id in create session response"))?
             .to_string();
 
         tracing::info!(session_id = %session_id, "created session");
@@ -313,19 +320,10 @@ impl BridgeClient {
             self.config.base_url, session_id
         );
 
-        // RtA headers: simple Bearer + anthropic-version (no beta, no runner version)
-        let mut h = HeaderMap::new();
-        h.insert(
-            AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {}", self.config.access_token)).unwrap(),
-        );
-        h.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        h.insert("anthropic-version", HeaderValue::from_static(API_VERSION));
-
         let resp = self
             .http
             .post(&url)
-            .headers(h)
+            .headers(self.simple_headers(&self.config.access_token))
             .json(&serde_json::json!({}))
             .timeout(std::time::Duration::from_secs(10))
             .send()
@@ -360,36 +358,8 @@ impl BridgeClient {
         worker_jwt: &str,
         worker_epoch: &serde_json::Value,
     ) -> Result<(), ClientError> {
-        let url = format!("{}/worker", session_url);
-
-        let body = serde_json::json!({
-            "worker_status": "idle",
-            "worker_epoch": worker_epoch,
-        });
-
-        let mut h = HeaderMap::new();
-        h.insert(
-            AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {worker_jwt}")).unwrap(),
-        );
-        h.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        h.insert("anthropic-version", HeaderValue::from_static(API_VERSION));
-
-        let resp = self
-            .http
-            .put(&url)
-            .headers(h)
-            .json(&body)
-            .timeout(std::time::Duration::from_secs(10))
-            .send()
+        self.set_worker_status(session_url, worker_jwt, worker_epoch, "idle")
             .await?;
-
-        let status = resp.status().as_u16();
-        if status >= 400 {
-            let body = resp.text().await.unwrap_or_default();
-            return Err(ClientError::Api { status, body });
-        }
-
         tracing::info!("worker registered (idle)");
         Ok(())
     }
@@ -401,25 +371,28 @@ impl BridgeClient {
         worker_jwt: &str,
         worker_epoch: &serde_json::Value,
     ) -> Result<(), ClientError> {
-        let url = format!("{}/worker", session_url);
+        self.set_worker_status(session_url, worker_jwt, worker_epoch, "processing")
+            .await
+    }
 
+    /// Set worker status (idle or processing).
+    async fn set_worker_status(
+        &self,
+        session_url: &str,
+        worker_jwt: &str,
+        worker_epoch: &serde_json::Value,
+        status: &str,
+    ) -> Result<(), ClientError> {
+        let url = format!("{}/worker", session_url);
         let body = serde_json::json!({
-            "worker_status": "processing",
+            "worker_status": status,
             "worker_epoch": worker_epoch,
         });
-
-        let mut h = HeaderMap::new();
-        h.insert(
-            AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {worker_jwt}")).unwrap(),
-        );
-        h.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        h.insert("anthropic-version", HeaderValue::from_static(API_VERSION));
 
         let resp = self
             .http
             .put(&url)
-            .headers(h)
+            .headers(self.simple_headers(worker_jwt))
             .json(&body)
             .timeout(std::time::Duration::from_secs(10))
             .send()
@@ -430,7 +403,9 @@ impl BridgeClient {
 
     /// Send raw JSON events to a session via the worker events API.
     ///
-    /// Each event must already be wrapped in `{ event_type, payload }` format.
+    /// Each event should have a `type` field. This method wraps each event
+    /// in the `{ event_type, payload }` envelope format required by the API,
+    /// and auto-generates a UUID if one isn't present.
     pub async fn send_worker_events_raw(
         &self,
         session_url: &str,
@@ -440,7 +415,6 @@ impl BridgeClient {
     ) -> Result<(), ClientError> {
         let url = format!("{}/worker/events", session_url);
 
-        // Wrap each event: { payload: { uuid, ...event } }
         let wrapped: Vec<serde_json::Value> = events
             .iter()
             .map(|e| {
@@ -451,12 +425,12 @@ impl BridgeClient {
                     .to_string();
                 let mut payload = e.clone();
                 if payload.get("uuid").is_none() {
-                    payload.as_object_mut().map(|o| {
+                    if let Some(o) = payload.as_object_mut() {
                         o.insert(
                             "uuid".into(),
                             serde_json::Value::String(uuid::Uuid::new_v4().to_string()),
-                        )
-                    });
+                        );
+                    }
                 }
                 serde_json::json!({
                     "event_type": event_type,
@@ -473,32 +447,13 @@ impl BridgeClient {
         let resp = self
             .http
             .post(&url)
-            .headers(self.worker_headers(worker_jwt))
+            .headers(self.simple_headers(worker_jwt))
             .json(&body)
             .timeout(std::time::Duration::from_secs(30))
             .send()
             .await?;
 
         check_status(resp).await
-    }
-
-    /// Send typed events to a session via the worker events API.
-    ///
-    /// Uses the `worker_jwt` from `bridge_link()`, NOT the OAuth token.
-    pub async fn send_worker_events(
-        &self,
-        session_url: &str,
-        worker_jwt: &str,
-        worker_epoch: &serde_json::Value,
-        events: &[Event],
-    ) -> Result<(), ClientError> {
-        // Convert Event → raw JSON and delegate to send_worker_events_raw.
-        let raw: Vec<serde_json::Value> = events
-            .iter()
-            .map(|e| serde_json::to_value(e).unwrap_or_default())
-            .collect();
-        self.send_worker_events_raw(session_url, worker_jwt, worker_epoch, &raw)
-            .await
     }
 
     /// Acknowledge delivery of events to the server.
@@ -526,112 +481,13 @@ impl BridgeClient {
         let resp = self
             .http
             .post(&url)
-            .headers(self.worker_headers(worker_jwt))
+            .headers(self.simple_headers(worker_jwt))
             .json(&body)
             .timeout(std::time::Duration::from_secs(10))
             .send()
             .await?;
 
         check_status(resp).await
-    }
-
-    /// Headers for worker endpoints (simple Bearer + anthropic-version).
-    fn worker_headers(&self, worker_jwt: &str) -> HeaderMap {
-        let mut h = HeaderMap::new();
-        h.insert(
-            AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {worker_jwt}")).unwrap(),
-        );
-        h.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        h.insert("anthropic-version", HeaderValue::from_static(API_VERSION));
-        h
-    }
-
-    // -----------------------------------------------------------------------
-    // Session events (OAuth token) — legacy/fallback
-    // -----------------------------------------------------------------------
-
-    /// Send events to a session via the sessions API.
-    pub async fn send_session_events(
-        &self,
-        session_id: &str,
-        events: &[Event],
-    ) -> Result<(), ClientError> {
-        let url = format!(
-            "{}/v1/sessions/{}/events",
-            self.config.base_url, session_id
-        );
-
-        let body = serde_json::json!({ "events": events });
-        let resp = self
-            .http
-            .post(&url)
-            .headers(self.oauth_headers())
-            .json(&body)
-            .timeout(std::time::Duration::from_secs(30))
-            .send()
-            .await?;
-
-        check_status(resp).await
-    }
-
-    /// Send raw JSON events to a session via the sessions API.
-    ///
-    /// Uses the same path as the web UI client for user events, ensuring
-    /// events are delivered to the WebSocket in FIFO order relative to
-    /// other sessions API events (like user messages).
-    pub async fn send_session_events_raw(
-        &self,
-        session_id: &str,
-        events: &[serde_json::Value],
-    ) -> Result<(), ClientError> {
-        let url = format!(
-            "{}/v1/sessions/{}/events",
-            self.config.base_url, session_id
-        );
-
-        let body = serde_json::json!({ "events": events });
-        let resp = self
-            .http
-            .post(&url)
-            .headers(self.oauth_headers())
-            .json(&body)
-            .timeout(std::time::Duration::from_secs(30))
-            .send()
-            .await?;
-
-        check_status(resp).await
-    }
-
-    // -----------------------------------------------------------------------
-    // Fetch session events (OAuth token) — for debugging
-    // -----------------------------------------------------------------------
-
-    /// Fetch events for a session, returning the raw JSON.
-    pub async fn get_session_events(
-        &self,
-        session_id: &str,
-    ) -> Result<serde_json::Value, ClientError> {
-        let url = format!(
-            "{}/v1/sessions/{}/events",
-            self.config.base_url, session_id
-        );
-
-        let resp = self
-            .http
-            .get(&url)
-            .headers(self.oauth_headers())
-            .timeout(std::time::Duration::from_secs(10))
-            .send()
-            .await?;
-
-        let status = resp.status().as_u16();
-        if status >= 400 {
-            let body = resp.text().await.unwrap_or_default();
-            return Err(ClientError::Api { status, body });
-        }
-
-        Ok(resp.json().await?)
     }
 
     // -----------------------------------------------------------------------
@@ -648,7 +504,7 @@ impl BridgeClient {
         let resp = self
             .http
             .post(&url)
-            .headers(self.oauth_headers())
+            .headers(self.full_headers(&self.config.access_token))
             .json(&serde_json::json!({}))
             .timeout(std::time::Duration::from_secs(10))
             .send()
@@ -668,7 +524,7 @@ impl BridgeClient {
         let resp = self
             .http
             .delete(&url)
-            .headers(self.oauth_headers())
+            .headers(self.full_headers(&self.config.access_token))
             .timeout(std::time::Duration::from_secs(10))
             .send()
             .await?;
@@ -686,8 +542,9 @@ impl BridgeClient {
             .ok_or(ClientError::MissingField("environment_id (not registered)"))
     }
 
-    /// Build standard headers with an arbitrary bearer token.
-    fn headers(&self, token: &str) -> HeaderMap {
+    /// Build full headers with beta, runner version, and org UUID.
+    /// Used for environment API endpoints (register, poll, ack, heartbeat, stop, archive, deregister).
+    fn full_headers(&self, token: &str) -> HeaderMap {
         let mut h = HeaderMap::new();
         h.insert(
             AUTHORIZATION,
@@ -710,18 +567,17 @@ impl BridgeClient {
         h
     }
 
-    /// Headers using the user's OAuth access token.
-    fn oauth_headers(&self) -> HeaderMap {
-        self.headers(&self.config.access_token)
-    }
-
-    /// Headers using the environment secret (for poll).
-    fn env_secret_headers(&self) -> HeaderMap {
-        let token = self
-            .environment_secret
-            .as_deref()
-            .unwrap_or(&self.config.access_token);
-        self.headers(token)
+    /// Build simple headers with just Bearer + anthropic-version.
+    /// Used for worker endpoints (bridge_link, worker registration, events, delivery).
+    fn simple_headers(&self, token: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(
+            AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+        );
+        h.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        h.insert("anthropic-version", HeaderValue::from_static(API_VERSION));
+        h
     }
 }
 
@@ -732,4 +588,64 @@ async fn check_status(resp: reqwest::Response) -> Result<(), ClientError> {
         return Err(ClientError::Api { status, body });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn full_headers_contains_required_fields() {
+        let config = BridgeConfig {
+            base_url: "https://api.anthropic.com".to_string(),
+            access_token: "test-token".to_string(),
+            org_uuid: "org-123".to_string(),
+        };
+        let client = BridgeClient::new(config);
+        let h = client.full_headers("my-secret");
+
+        assert_eq!(
+            h.get(AUTHORIZATION).unwrap().to_str().unwrap(),
+            "Bearer my-secret"
+        );
+        assert_eq!(
+            h.get("anthropic-version").unwrap().to_str().unwrap(),
+            API_VERSION
+        );
+        assert_eq!(
+            h.get("anthropic-beta").unwrap().to_str().unwrap(),
+            BETA_HEADER
+        );
+        assert_eq!(
+            h.get("x-environment-runner-version").unwrap().to_str().unwrap(),
+            RUNNER_VERSION
+        );
+        assert_eq!(
+            h.get("x-organization-uuid").unwrap().to_str().unwrap(),
+            "org-123"
+        );
+    }
+
+    #[test]
+    fn simple_headers_has_no_beta() {
+        let config = BridgeConfig {
+            base_url: "https://api.anthropic.com".to_string(),
+            access_token: "test-token".to_string(),
+            org_uuid: "org-123".to_string(),
+        };
+        let client = BridgeClient::new(config);
+        let h = client.simple_headers("worker-jwt");
+
+        assert_eq!(
+            h.get(AUTHORIZATION).unwrap().to_str().unwrap(),
+            "Bearer worker-jwt"
+        );
+        assert_eq!(
+            h.get("anthropic-version").unwrap().to_str().unwrap(),
+            API_VERSION
+        );
+        assert!(h.get("anthropic-beta").is_none());
+        assert!(h.get("x-environment-runner-version").is_none());
+        assert!(h.get("x-organization-uuid").is_none());
+    }
 }

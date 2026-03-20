@@ -56,7 +56,10 @@ pub fn ensure_trusted(session_dir: &Path) -> Result<()> {
             "disabledMcpjsonServers": [],
         });
         let content = serde_json::to_string_pretty(&data)?;
-        fs::write(&path, content)?;
+        // Atomic write via tmp+rename to avoid corrupting shared config on crash
+        let tmp = path.with_extension("json.tmp");
+        fs::write(&tmp, &content)?;
+        fs::rename(&tmp, &path)?;
     }
 
     Ok(())

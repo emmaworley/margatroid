@@ -27,11 +27,9 @@ fn main() {
                 tracing::error!("failed to create tmux session: {e}");
                 std::process::exit(1);
             }
-        } else {
-            if let Err(e) = tmux::create_session("_Session Manager") {
-                tracing::error!("failed to create tmux session: {e}");
-                std::process::exit(1);
-            }
+        } else if let Err(e) = tmux::create_session("_Session Manager") {
+            tracing::error!("failed to create tmux session: {e}");
+            std::process::exit(1);
         }
         tracing::info!("created tmux session '{TMUX_SESSION}'");
     } else {
@@ -57,6 +55,12 @@ fn main() {
     let tui_path = tui_bin.to_string_lossy().into_owned();
 
     for (name, info) in &sessions {
+        // Validate session name from state file before using in commands
+        if !orchestrator::image::is_valid_session_name(name) {
+            tracing::warn!("skipping session with invalid name: {name:?}");
+            continue;
+        }
+
         if existing.contains(name) {
             tracing::info!("session {name} already running, skipping");
             continue;

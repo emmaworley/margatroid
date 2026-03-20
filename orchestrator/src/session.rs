@@ -85,6 +85,10 @@ pub fn list_all() -> Result<Vec<Session>> {
                 if name.starts_with('_') || !entry.path().is_dir() {
                     continue;
                 }
+                // Skip directories with invalid session names
+                if !image::is_valid_session_name(&name) {
+                    continue;
+                }
                 if result.contains_key(&name) {
                     continue;
                 }
@@ -105,10 +109,7 @@ pub fn list_all() -> Result<Vec<Session>> {
                     name.clone(),
                     Session {
                         name: name.clone(),
-                        image: saved
-                            .get(&name)
-                            .map(|i| i.image.clone())
-                            .unwrap_or_else(|| "unknown".to_string()),
+                        image: "unknown".to_string(),
                         status,
                         container_id,
                         session_dir,

@@ -32,6 +32,13 @@ pub fn fork_helper(
             // Detach from parent's session
             let _ = nix::unistd::setsid();
 
+            // Close inherited file descriptors (3..1024) to avoid leaking
+            // lock files and network connections from the parent process.
+            // FDs 0-2 are stdin/stdout/stderr which we keep.
+            for fd in 3..1024 {
+                let _ = nix::unistd::close(fd);
+            }
+
             // Ignore SIGINT in the helper
             unsafe {
                 nix::sys::signal::signal(

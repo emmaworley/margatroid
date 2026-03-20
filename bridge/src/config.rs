@@ -1,7 +1,7 @@
 //! Configuration and credential loading for the bridge API.
 
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const DEFAULT_API_URL: &str = "https://api.anthropic.com";
 
@@ -106,7 +106,7 @@ fn home_dir() -> Result<PathBuf, ConfigError> {
         .map_err(|_| ConfigError::NoHome)
 }
 
-fn read_json<T: serde::de::DeserializeOwned>(path: &PathBuf) -> Result<T, std::io::Error> {
+fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, std::io::Error> {
     let data = std::fs::read(path)?;
     serde_json::from_slice(&data).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }

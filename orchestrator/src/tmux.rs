@@ -3,7 +3,6 @@
 use crate::TMUX_SESSION;
 use std::process::Command;
 
-
 #[derive(Debug, thiserror::Error)]
 pub enum TmuxError {
     #[error("tmux command failed: {0}")]
