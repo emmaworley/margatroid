@@ -193,7 +193,7 @@ pub fn launch(name: &str, image_input: &str, inject_resume: bool) -> Result<()> 
 
     if image_input == "host" {
         // Uncontainerized: exec claude directly on the host
-        let claude_bin = crate::home_dir().join(".local/bin/claude");
+        let claude_bin = podman::find_claude_bin();
         tracing::info!(name, bin = %claude_bin.display(), "exec claude (host mode)");
         let mut cmd = std::process::Command::new(claude_bin);
         cmd.args(&claude_args);
