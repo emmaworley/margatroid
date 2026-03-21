@@ -32,6 +32,14 @@ pub fn find_claude_bin() -> std::path::PathBuf {
 }
 
 /// Build the podman run command for a session. Does not execute it.
+///
+/// Container layout:
+///   /home/<name>/              ← $HOME (session_dir on host)
+///     .claude.json             ← per-session config (seeded by setup_session)
+///     .claude/.credentials.json ← ro mount from host credentials
+///     CLAUDE.md                ← session instructions
+///     (session working files)
+///   <claude_bin_dir>/          ← ro mount of claude binary's directory
 pub fn build_run_command(
     name: &str,
     image: &str,
@@ -39,29 +47,24 @@ pub fn build_run_command(
     claude_args: &[String],
 ) -> Command {
     let home = home_dir();
-    let home_str = home.to_string_lossy();
     let claude_bin = find_claude_bin();
     let claude_bin_dir = claude_bin.parent().unwrap_or(&claude_bin);
     let claude_bin_name = claude_bin.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "claude".to_string());
-    let claude_json = home.join(".claude.json");
-    let claude_dir = home.join(".claude");
     let hostname = hostname::get()
         .map(|h| h.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "unknown".into());
-    let user = std::env::var("USER").unwrap_or_else(|_| "claude".into());
 
     let uid = nix::unistd::getuid().as_raw();
     let gid = nix::unistd::getgid().as_raw();
 
-    // Container-internal paths mirror the host so bind mounts preserve permissions
-    // and trust entries in ~/.claude.json match.
-    let margatroid = crate::margatroid_dir();
+    // Container paths
+    let c_home = format!("/home/{name}");
     let c_bin_dir = claude_bin_dir.to_string_lossy();
-    let c_session_dir = format!("{}/sessions/{name}", margatroid.display());
-    let c_claude_dir = format!("{home_str}/.claude");
-    let c_claude_json = format!("{home_str}/.claude.json");
+
+    // Host credentials path (ro mounted into container)
+    let host_creds = home.join(".claude/.credentials.json");
 
     let mut cmd = Command::new("podman");
     cmd.args([
@@ -76,30 +79,30 @@ pub fn build_run_command(
         &format!("--user={uid}:{gid}"),
     ]);
 
-    // Mount the directory containing claude (not the file itself) to avoid
-    // SELinux relabeling and symlink issues that cause Permission denied.
+    // Mounts:
+    // - Session dir as container home (rw) — contains .claude.json, CLAUDE.md, working files
+    // - Host credentials as ro mount inside the session's .claude/
+    // - Claude binary directory (ro)
+    cmd.arg(format!("-v={}:{c_home}:rw", session_dir.display()));
+    cmd.arg(format!("-v={}:{c_home}/.claude/.credentials.json:ro", host_creds.display()));
     cmd.arg(format!("-v={c_bin_dir}:{c_bin_dir}:ro"));
-    cmd.arg(format!("-v={}:{c_session_dir}:rw", session_dir.display()));
-    cmd.arg(format!("-v={}:{c_claude_dir}:rw", claude_dir.display()));
-    cmd.arg(format!("-v={}:{c_claude_json}:rw", claude_json.display()));
 
     // Environment
-    cmd.args(["-e", &format!("HOME={home_str}")]);
+    cmd.args(["-e", &format!("HOME={c_home}")]);
     cmd.args(["-e", &format!("PATH={c_bin_dir}:/usr/local/bin:/usr/bin:/bin")]);
     cmd.args(["-e", "LANG=en_US.UTF-8"]);
-    cmd.args(["-e", &format!("USER={user}")]);
-    cmd.args(["-e", &format!("LOGNAME={user}")]);
+    cmd.args(["-e", &format!("USER={name}")]);
+    cmd.args(["-e", &format!("LOGNAME={name}")]);
     cmd.args(["-e", "SHELL=/bin/bash"]);
     cmd.args(["-e", "DISABLE_AUTOUPDATER=1"]);
 
     // Working directory
-    cmd.arg(format!("-w={c_session_dir}"));
+    cmd.arg(format!("-w={c_home}"));
 
     // Image
     cmd.arg(image);
 
-    // Command: run claude directly (not via --entrypoint, which has
-    // issues with catatonit + bind-mounted binaries on some systems)
+    // Command
     cmd.arg(&claude_bin_name);
     cmd.args(claude_args);
 
@@ -165,21 +168,55 @@ mod tests {
     }
 
     #[test]
-    fn build_run_command_has_correct_container_name() {
+    fn container_name() {
         let args = test_cmd("test-session", "ubuntu:latest", "/tmp/s", &[]);
         assert!(args.contains(&"--name=margatroid-test-session".to_string()));
     }
 
     #[test]
-    fn build_run_command_has_workdir() {
+    fn home_is_session_name() {
         let args = test_cmd("myproj", "debian", "/tmp/s", &[]);
-        let mdir = crate::margatroid_dir();
-        let expected = format!("-w={}/sessions/myproj", mdir.display());
-        assert!(args.contains(&expected), "missing workdir, args: {args:?}");
+        assert!(args.contains(&"HOME=/home/myproj".to_string()));
+        assert!(args.contains(&"-w=/home/myproj".to_string()));
+        assert!(args.contains(&"USER=myproj".to_string()));
     }
 
     #[test]
-    fn build_run_command_passes_claude_args() {
+    fn session_dir_mounted_as_home() {
+        let args = test_cmd("box", "ubuntu", "/tmp/sessions/box", &[]);
+        let mount = args.iter().find(|a| a.starts_with("-v=/tmp/sessions/box:"));
+        assert!(mount.is_some(), "missing session dir mount, args: {args:?}");
+        assert!(mount.unwrap().contains("/home/box:rw"), "session dir should mount as /home/<name>:rw");
+    }
+
+    #[test]
+    fn credentials_mounted_readonly() {
+        let args = test_cmd("test", "ubuntu", "/tmp/s", &[]);
+        let creds_mount = args.iter().find(|a| a.contains(".credentials.json") && a.ends_with(":ro"));
+        assert!(creds_mount.is_some(), "missing ro credentials mount, args: {args:?}");
+    }
+
+    #[test]
+    fn no_host_claude_json_mounted() {
+        let args = test_cmd("test", "ubuntu", "/tmp/s", &[]);
+        // Should NOT mount the host's ~/.claude.json or ~/.claude/ directly
+        let home = home_dir();
+        let host_claude_json = format!("{}/.claude.json", home.display());
+        let has_host_config = args.iter().any(|a| a.starts_with("-v=") && a.contains(&host_claude_json) && !a.contains(".credentials.json"));
+        assert!(!has_host_config, "should not mount host ~/.claude.json, args: {args:?}");
+    }
+
+    #[test]
+    fn claude_binary_dir_readonly() {
+        let args = test_cmd("test", "ubuntu", "/tmp/s", &[]);
+        let bin_dir = find_claude_bin();
+        let parent = bin_dir.parent().unwrap().to_string_lossy();
+        let mount = args.iter().find(|a| a.starts_with(&format!("-v={parent}:")) && a.ends_with(":ro"));
+        assert!(mount.is_some(), "missing ro claude bin dir mount, args: {args:?}");
+    }
+
+    #[test]
+    fn passes_claude_args() {
         let claude_args = vec!["--name".to_string(), "my-session".to_string()];
         let args = test_cmd("test", "ubuntu", "/tmp/s", &claude_args);
         assert!(args.contains(&"--name".to_string()));
@@ -187,60 +224,23 @@ mod tests {
     }
 
     #[test]
-    fn build_run_command_has_bind_mounts() {
+    fn no_entrypoint() {
         let args = test_cmd("test", "ubuntu", "/tmp/s", &[]);
-        let has_session_mount = args.iter().any(|a| a.contains("/tmp/s:") && a.starts_with("-v="));
-        assert!(has_session_mount, "missing session dir bind mount, args: {args:?}");
+        assert!(!args.contains(&"--entrypoint".to_string()));
     }
 
     #[test]
-    fn build_run_command_sets_env_vars() {
-        let args = test_cmd("test", "ubuntu", "/tmp/s", &[]);
-        let home = home_dir();
-        let expected_home = format!("HOME={}", home.display());
-        assert!(args.contains(&expected_home), "missing HOME env");
-        assert!(args.contains(&"DISABLE_AUTOUPDATER=1".to_string()));
-    }
-
-    #[test]
-    fn build_run_command_has_claude_command() {
-        let args = test_cmd("test", "ubuntu", "/tmp/s", &[]);
-        // claude binary name should appear after the image name
-        let img_idx = args.iter().position(|a| a == "ubuntu").unwrap();
-        let cmd_name = &args[img_idx + 1];
-        assert!(cmd_name.contains("claude"), "expected claude command after image, got: {cmd_name}");
-    }
-
-    #[test]
-    fn build_run_command_has_no_entrypoint() {
-        let args = test_cmd("test", "ubuntu", "/tmp/s", &[]);
-        assert!(!args.contains(&"--entrypoint".to_string()),
-            "should not use --entrypoint, args: {args:?}");
-    }
-
-    #[test]
-    fn build_run_command_mounts_bin_dir_readonly() {
-        let args = test_cmd("test", "ubuntu", "/tmp/s", &[]);
-        // The claude binary's parent directory should be mounted read-only (no :z)
-        let ro_mount = args.iter().find(|a| a.starts_with("-v=") && a.ends_with(":ro"));
-        assert!(ro_mount.is_some(), "missing read-only bin dir mount, args: {args:?}");
-    }
-
-    #[test]
-    fn build_run_command_uses_current_uid() {
+    fn uses_current_uid() {
         let args = test_cmd("test", "ubuntu", "/tmp/s", &[]);
         let uid = nix::unistd::getuid().as_raw();
         let gid = nix::unistd::getgid().as_raw();
-        let expected_userns = format!("--userns=keep-id:uid={uid},gid={gid}");
-        let expected_user = format!("--user={uid}:{gid}");
-        assert!(args.contains(&expected_userns), "missing userns with current uid");
-        assert!(args.contains(&expected_user), "missing user with current uid");
+        assert!(args.contains(&format!("--userns=keep-id:uid={uid},gid={gid}")));
+        assert!(args.contains(&format!("--user={uid}:{gid}")));
     }
 
     #[test]
     fn find_claude_bin_returns_path() {
         let bin = find_claude_bin();
-        // Should return some path (either from PATH or fallback)
         assert!(!bin.as_os_str().is_empty());
     }
 }

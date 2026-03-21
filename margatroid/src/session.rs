@@ -125,11 +125,11 @@ pub fn list_all() -> Result<Vec<Session>> {
     Ok(sessions)
 }
 
-/// Set up host directories, trust, and CLAUDE.md for a session.
+/// Set up host directories, per-session config, and CLAUDE.md for a session.
 pub fn setup(name: &str) -> Result<PathBuf> {
     let session_dir = margatroid_dir().join("sessions").join(name);
-    claude_config::ensure_trusted(&session_dir)?;
-    claude_config::write_claude_md(&session_dir, name)?;
+    let container_home = format!("/home/{name}");
+    claude_config::setup_session(&session_dir, name, &container_home)?;
     Ok(session_dir)
 }
 
