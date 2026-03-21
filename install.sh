@@ -178,7 +178,11 @@ for bin in "${BINARIES[@]}"; do
         warn "Binary not found: $src (skipping)"
         continue
     fi
-    cp "$src" "$dst"
+    # Use tmp+rename to atomically replace running binaries.
+    # Direct cp fails with ETXTBSY if the binary is currently executing.
+    tmp="$dst.tmp.$$"
+    cp "$src" "$tmp"
+    mv -f "$tmp" "$dst"
 done
 
 # ---------------------------------------------------------------------------
