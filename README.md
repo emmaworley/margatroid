@@ -139,7 +139,6 @@ The daemon exposes these commands via the claude.ai/code web interface:
 | `/restart <name>` | Restart a session |
 | `/delete <name> [--data]` | Delete a session (optionally remove data) |
 | `/info <name>` | Show session details |
-| `/images` | Show recently used images |
 | `/help` | Show command help |
 
 ## Configuration
@@ -156,7 +155,6 @@ The daemon exposes these commands via the claude.ai/code web interface:
 ```
 ~/.margatroid/state/
   sessions.json                # Active sessions (name → image)
-  image-mru.json               # Most recently used images
 ```
 
 ### Session Data

@@ -26,14 +26,12 @@ pub struct App {
     pub custom_img_buf: String,
     pub selected_image: String,
     pub delete_data: bool,
-    pub mru_images: Vec<String>,
     pub status_message: Option<String>,
 }
 
 impl App {
     pub fn new() -> Self {
         let sessions = session::list_all().unwrap_or_default();
-        let mru_images = margatroid::image::load_mru();
         Self {
             sessions,
             view: View::SessionList,
@@ -42,26 +40,22 @@ impl App {
             custom_img_buf: String::new(),
             selected_image: String::new(),
             delete_data: false,
-            mru_images,
             status_message: None,
         }
     }
 
     pub fn refresh_sessions(&mut self) {
         self.sessions = session::list_all().unwrap_or_default();
-        self.mru_images = margatroid::image::load_mru();
     }
 
     /// Get the image items for the create flow.
-    /// The last two items are always "Enter custom image..." and "No container (host)".
     pub fn image_items(&self) -> Vec<String> {
-        let mut items = self.mru_images.clone();
-        if items.is_empty() {
-            items.push("ubuntu".to_string());
-        }
-        items.push("Enter custom image...".to_string());
-        items.push("No container (host)".to_string());
-        items
+        vec![
+            "ubuntu".to_string(),
+            "debian".to_string(),
+            "Enter custom image...".to_string(),
+            "No container (host)".to_string(),
+        ]
     }
 }
 
@@ -129,8 +123,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     disable_raw_mode()?;
                     return Err(format!("Registration failed: {e}").into());
                 }
-                let _ = margatroid::image::record_usage(&image);
-
                 let tui_bin = margatroid::margatroid_dir().join("bin/margatroid-tui");
                 let tui_path = tui_bin.to_string_lossy().into_owned();
 

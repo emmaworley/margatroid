@@ -144,7 +144,6 @@ pub fn launch(name: &str, image_input: &str, inject_resume: bool) -> Result<()> 
     let resolved_image = image::resolve(image_input);
 
     state::register(name, image_input)?;
-    let _ = image::record_usage(image_input);
 
     // Rename tmux window
     if let Ok(pane_id) = std::env::var("TMUX_PANE") {

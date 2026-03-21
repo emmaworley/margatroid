@@ -56,7 +56,6 @@ pub fn handle_command(input: &str) -> String {
                 cmd_info(parts[1])
             }
         }
-        "images" => cmd_images(),
         "help" | "?" => help_text(),
         _ => format!(
             "Unknown command: `{}`. Type `/help` for available commands.",
@@ -153,8 +152,6 @@ fn cmd_start(name: &str, image: &str) -> String {
         return format!("Registration failed: {e}");
     }
 
-    let _ = margatroid::image::record_usage(image);
-
     // Launch in a new tmux window
     let tui_bin = margatroid::margatroid_dir().join("bin/margatroid-tui");
     let tui_path = tui_bin.to_string_lossy().into_owned();
@@ -226,19 +223,6 @@ fn cmd_info(name: &str) -> String {
     }
 }
 
-fn cmd_images() -> String {
-    let mru = margatroid::image::load_mru();
-    if mru.is_empty() {
-        return "No images in history. Start a session to populate the MRU list.".to_string();
-    }
-
-    let mut out = "## Recent Images\n\n".to_string();
-    for (i, img) in mru.iter().enumerate() {
-        out.push_str(&format!("{}. `{}`\n", i + 1, img));
-    }
-    out
-}
-
 fn help_text() -> String {
     "## Commands\n\n\
      | Command | Description |\n\
@@ -250,7 +234,6 @@ fn help_text() -> String {
      | `/restart <name>` | Restart a session |\n\
      | `/delete <name> [--data]` | Delete a session |\n\
      | `/info <name>` | Show session details |\n\
-     | `/images` | Show recent images |\n\
      | `/help` | Show this help |"
         .to_string()
 }
