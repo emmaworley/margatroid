@@ -8,6 +8,11 @@
 # Update (runs automatically via systemd timer and on daemon start):
 #   ~/.margatroid/install.sh
 #
+
+# Wrap everything in a function so bash reads the entire script into memory
+# before executing. Without this, `git pull` can modify this file mid-run
+# (bash reads scripts incrementally), causing partial old + new code execution.
+main() {
 set -euo pipefail
 
 REPO_URL="https://github.com/emmaworley/margatroid.git"
@@ -234,3 +239,6 @@ if [ "$MODE" = install ]; then
     echo "    ~/.margatroid/uninstall.sh"
     echo
 fi
+
+}
+main "$@"
