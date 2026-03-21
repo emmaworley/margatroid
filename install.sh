@@ -6,7 +6,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/emmaworley/margatroid/main/install.sh | bash
 #
 # Update (runs automatically via systemd timer and on daemon start):
-#   ~/.margatroid/install.sh
+#   ~/.margatroid/repo/install.sh
 #
 
 # Wrap everything in a function so bash reads the entire script into memory
@@ -17,6 +17,7 @@ set -euo pipefail
 
 REPO_URL="https://github.com/emmaworley/margatroid.git"
 INSTALL_DIR="${MARGATROID_DIR:-$HOME/.margatroid}"
+REPO_DIR="$INSTALL_DIR/repo"
 BIN_DIR="$INSTALL_DIR/bin"
 SYSTEMD_DIR="$HOME/.config/systemd/user"
 BINARIES=(margatroid-boot margatroid-daemon margatroid-tui margatroid-cleanup)
@@ -81,10 +82,23 @@ run_visible() {
 }
 
 # ---------------------------------------------------------------------------
+# Migrate from old layout: repo was cloned directly into $INSTALL_DIR
+# ---------------------------------------------------------------------------
+
+if [ -d "$INSTALL_DIR/.git" ] && [ ! -d "$REPO_DIR" ]; then
+    info "Migrating repo to $REPO_DIR"
+    # Move the git repo into a subdirectory, preserving sessions/state/bin
+    tmp_repo="$INSTALL_DIR/.repo-migrate-$$"
+    git clone "$INSTALL_DIR" "$tmp_repo" --quiet 2>/dev/null
+    rm -rf "$INSTALL_DIR/.git"
+    mv "$tmp_repo" "$REPO_DIR"
+fi
+
+# ---------------------------------------------------------------------------
 # Detect mode: fresh install vs update
 # ---------------------------------------------------------------------------
 
-if [ -d "$INSTALL_DIR/.git" ]; then
+if [ -d "$REPO_DIR/.git" ]; then
     MODE=update
 else
     MODE=install
@@ -111,7 +125,8 @@ if [ "$MODE" = install ]; then
         error "Claude Code credentials not found at ~/.claude/.credentials.json — run 'claude' and log in first"
     fi
 
-    run_visible "Cloning repository" git clone "$REPO_URL" "$INSTALL_DIR"
+    mkdir -p "$INSTALL_DIR"
+    run_visible "Cloning repository" git clone "$REPO_URL" "$REPO_DIR"
 fi
 
 # ---------------------------------------------------------------------------
@@ -119,7 +134,7 @@ fi
 # ---------------------------------------------------------------------------
 
 if [ "$MODE" = update ]; then
-    cd "$INSTALL_DIR"
+    cd "$REPO_DIR"
     git fetch origin main --quiet 2>/dev/null || true
 
     LOCAL=$(git rev-parse HEAD)
@@ -138,7 +153,7 @@ fi
 # Build
 # ---------------------------------------------------------------------------
 
-run_visible "Building" cargo build --release --manifest-path "$INSTALL_DIR/Cargo.toml"
+run_visible "Building" cargo build --release --manifest-path "$REPO_DIR/Cargo.toml"
 
 # ---------------------------------------------------------------------------
 # Install binaries
@@ -147,7 +162,7 @@ run_visible "Building" cargo build --release --manifest-path "$INSTALL_DIR/Cargo
 mkdir -p "$BIN_DIR"
 
 for bin in "${BINARIES[@]}"; do
-    src="$INSTALL_DIR/target/release/$bin"
+    src="$REPO_DIR/target/release/$bin"
     dst="$BIN_DIR/$bin"
     if [ ! -f "$src" ]; then
         warn "Binary not found: $src (skipping)"
@@ -166,7 +181,7 @@ done
 
 mkdir -p "$SYSTEMD_DIR"
 
-for f in "$INSTALL_DIR"/systemd/*.service "$INSTALL_DIR"/systemd/*.timer; do
+for f in "$REPO_DIR"/systemd/*.service "$REPO_DIR"/systemd/*.timer; do
     [ -f "$f" ] && cp "$f" "$SYSTEMD_DIR/"
 done
 
@@ -190,7 +205,7 @@ systemctl --user enable --now margatroid-update.timer 2>/dev/null || true
 if [ "$MODE" = update ]; then
     systemctl --user restart margatroid-tmux.service 2>/dev/null || true
     systemctl --user restart margatroid-daemon.service 2>/dev/null || true
-    NEW_VERSION=$(git -C "$INSTALL_DIR" log -1 --format='%h %s')
+    NEW_VERSION=$(git -C "$REPO_DIR" log -1 --format='%h %s')
     info "Updated to: $NEW_VERSION"
 fi
 
@@ -209,7 +224,7 @@ if [ "$MODE" = install ]; then
     echo "    https://claude.ai/code"
     echo
     echo "  Uninstall:"
-    echo "    ~/.margatroid/uninstall.sh"
+    echo "    ~/.margatroid/repo/uninstall.sh"
     echo
 fi
 

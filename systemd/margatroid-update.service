@@ -6,5 +6,5 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 Environment=PATH=%h/.margatroid/bin:%h/.cargo/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=%h/.margatroid/install.sh
+ExecStart=%h/.margatroid/repo/install.sh
 TimeoutStartSec=600

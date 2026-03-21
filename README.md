@@ -88,13 +88,13 @@ Running sessions are not disrupted by updates. Container sessions live in tmux a
 To update manually:
 
 ```sh
-~/.margatroid/install.sh
+~/.margatroid/repo/install.sh
 ```
 
 ### Uninstall
 
 ```sh
-~/.margatroid/uninstall.sh
+~/.margatroid/repo/uninstall.sh
 ```
 
 Stops services, removes systemd units, and deletes `~/.margatroid` (source, binaries, state, and session data).

@@ -68,6 +68,7 @@
 ## File layout
 ```
 ~/.margatroid/                    # Everything lives here
+  repo/                           # Git clone (source, Cargo.toml, target/)
   bin/                            # Installed binaries
   sessions/<name>/                # Per-session working directories
     .claude.json                  # Per-session config (container mode)
@@ -76,5 +77,4 @@
   state/
     sessions.json                 # Active sessions (name → image)
     sessions.json.lock            # flock file (O_CLOEXEC)
-  (source repo, target/, etc.)
 ```
