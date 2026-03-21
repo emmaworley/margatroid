@@ -52,8 +52,8 @@ impl App {
     pub fn image_items(&self) -> Vec<String> {
         vec![
             "ubuntu".to_string(),
-            "debian".to_string(),
-            "Enter custom image...".to_string(),
+            "alpine".to_string(),
+            "Other image...".to_string(),
             "No container (host)".to_string(),
         ]
     }
