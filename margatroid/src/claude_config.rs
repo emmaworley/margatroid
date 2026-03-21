@@ -33,20 +33,26 @@ fn host_claude_json_path() -> std::path::PathBuf {
 /// - Creates a per-session .claude.json with trust, remoteDialogSeen, and org UUID
 /// - Creates .claude/ directory inside the session dir (mount target for credentials)
 /// - Writes a default CLAUDE.md if one doesn't exist
-pub fn setup_session(session_dir: &Path, name: &str, container_home: &str) -> Result<()> {
+pub fn setup_session(session_dir: &Path, name: &str, container_home: &str, host_mode: bool) -> Result<()> {
     fs::create_dir_all(session_dir)?;
 
-    // Ensure remoteDialogSeen on host (for host-mode sessions and first-time setup)
-    ensure_host_remote_dialog()?;
+    let session_dir_str = session_dir.to_string_lossy().to_string();
 
-    // Read org UUID from host config
-    let org_uuid = read_org_uuid()?;
+    if host_mode {
+        // Host mode: Claude Code runs with the real home dir, so trust
+        // the session dir in the host's ~/.claude.json directly.
+        ensure_host_config(Some(&session_dir_str))?;
+    } else {
+        // Container mode: trust goes in per-session config (container sees
+        // /home/<name> as its home), host config just needs remoteDialogSeen.
+        ensure_host_config(None)?;
 
-    // Create per-session .claude.json
-    write_session_config(session_dir, container_home, &org_uuid)?;
+        let org_uuid = read_org_uuid()?;
+        write_session_config(session_dir, container_home, &org_uuid)?;
 
-    // Create .claude/ directory for credentials mount
-    fs::create_dir_all(session_dir.join(".claude"))?;
+        // Create .claude/ directory for credentials mount
+        fs::create_dir_all(session_dir.join(".claude"))?;
+    }
 
     // Write CLAUDE.md
     write_claude_md(session_dir, name)?;
@@ -54,8 +60,8 @@ pub fn setup_session(session_dir: &Path, name: &str, container_home: &str) -> Re
     Ok(())
 }
 
-/// Ensure `remoteDialogSeen: true` in the host's ~/.claude.json.
-fn ensure_host_remote_dialog() -> Result<()> {
+/// Ensure `remoteDialogSeen: true` and optionally trust a directory in the host's ~/.claude.json.
+fn ensure_host_config(trust_dir: Option<&str>) -> Result<()> {
     let path = host_claude_json_path();
     let mut data: serde_json::Value = match fs::read_to_string(&path) {
         Ok(content) => serde_json::from_str(&content)?,
@@ -64,9 +70,36 @@ fn ensure_host_remote_dialog() -> Result<()> {
     };
 
     let obj = data.as_object_mut().ok_or(ConfigError::NotAnObject)?;
+    let mut changed = false;
 
     if !obj.get("remoteDialogSeen").and_then(|v| v.as_bool()).unwrap_or(false) {
         obj.insert("remoteDialogSeen".into(), serde_json::Value::Bool(true));
+        changed = true;
+    }
+
+    if let Some(dir) = trust_dir {
+        let projects = obj
+            .entry("projects")
+            .or_insert_with(|| serde_json::json!({}));
+        let needs_trust = !projects
+            .get(dir)
+            .and_then(|p| p.get("hasTrustDialogAccepted"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if needs_trust {
+            projects[dir] = serde_json::json!({
+                "hasTrustDialogAccepted": true,
+                "allowedTools": [],
+                "mcpContextUris": [],
+                "mcpServers": {},
+                "enabledMcpjsonServers": [],
+                "disabledMcpjsonServers": [],
+            });
+            changed = true;
+        }
+    }
+
+    if changed {
         let content = serde_json::to_string_pretty(&data)?;
         let tmp = path.with_extension("json.tmp");
         fs::write(&tmp, &content)?;

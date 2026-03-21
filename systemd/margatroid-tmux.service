@@ -6,9 +6,11 @@ After=network.target
 Type=simple
 Environment=PATH=%h/.margatroid/bin:%h/.cargo/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=%h/.margatroid/bin/margatroid-boot
+ExecStop=/bin/sh -c 'podman ps -q --filter "name=^margatroid-" | xargs -r podman stop -t 10'
 ExecStop=/usr/bin/tmux kill-session -t margatroid
 Restart=always
 RestartSec=5
+TimeoutStopSec=30
 
 [Install]
 WantedBy=default.target

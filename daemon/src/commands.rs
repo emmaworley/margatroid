@@ -143,7 +143,7 @@ fn parse_start(parts: &[&str]) -> String {
 
 fn cmd_start(name: &str, image: &str) -> String {
     // Setup and register (don't exec — we're a daemon)
-    match session::setup(name) {
+    match session::setup(name, image) {
         Ok(_) => {}
         Err(e) => return format!("Setup failed: {e}"),
     }

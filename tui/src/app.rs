@@ -115,7 +115,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             RunResult::Launch { name, image } => {
                 // Setup session and launch in a new tmux window.
                 // The manager pane stays alive — sessions always open in their own pane.
-                if let Err(e) = session::setup(&name) {
+                if let Err(e) = session::setup(&name, &image) {
                     disable_raw_mode()?;
                     return Err(format!("Setup failed: {e}").into());
                 }

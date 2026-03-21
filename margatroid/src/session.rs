@@ -126,10 +126,11 @@ pub fn list_all() -> Result<Vec<Session>> {
 }
 
 /// Set up host directories, per-session config, and CLAUDE.md for a session.
-pub fn setup(name: &str) -> Result<PathBuf> {
+pub fn setup(name: &str, image: &str) -> Result<PathBuf> {
     let session_dir = margatroid_dir().join("sessions").join(name);
     let container_home = format!("/home/{name}");
-    claude_config::setup_session(&session_dir, name, &container_home)?;
+    let host_mode = image == "host";
+    claude_config::setup_session(&session_dir, name, &container_home, host_mode)?;
     Ok(session_dir)
 }
 
@@ -138,7 +139,7 @@ pub fn setup(name: &str) -> Result<PathBuf> {
 pub fn launch(name: &str, image_input: &str, inject_resume: bool) -> Result<()> {
     tracing::info!(name, image = image_input, "launching session");
 
-    let session_dir = setup(name)?;
+    let session_dir = setup(name, image_input)?;
     tracing::debug!(dir = %session_dir.display(), "session directory ready");
 
     let resolved_image = image::resolve(image_input);
