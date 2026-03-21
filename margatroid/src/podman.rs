@@ -13,18 +13,22 @@ pub enum PodmanError {
 type Result<T> = std::result::Result<T, PodmanError>;
 
 /// Find the claude binary by searching PATH, falling back to ~/.local/bin/claude.
+/// Returns the canonicalized (symlinks resolved) path.
 pub fn find_claude_bin() -> std::path::PathBuf {
     // Check PATH first
     if let Ok(output) = Command::new("which").arg("claude").output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() {
-                return std::path::PathBuf::from(path);
+                let p = std::path::PathBuf::from(&path);
+                // Resolve symlinks so we mount the real file/directory
+                return std::fs::canonicalize(&p).unwrap_or(p);
             }
         }
     }
     // Fallback
-    home_dir().join(".local/bin/claude")
+    let fallback = home_dir().join(".local/bin/claude");
+    std::fs::canonicalize(&fallback).unwrap_or(fallback)
 }
 
 /// Build the podman run command for a session. Does not execute it.
@@ -37,18 +41,22 @@ pub fn build_run_command(
     let home = home_dir();
     let home_str = home.to_string_lossy();
     let claude_bin = find_claude_bin();
+    let claude_bin_dir = claude_bin.parent().unwrap_or(&claude_bin);
+    let claude_bin_name = claude_bin.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "claude".to_string());
     let claude_json = home.join(".claude.json");
     let claude_dir = home.join(".claude");
     let hostname = hostname::get()
         .map(|h| h.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "unknown".into());
+    let user = std::env::var("USER").unwrap_or_else(|_| "claude".into());
 
     let uid = nix::unistd::getuid().as_raw();
     let gid = nix::unistd::getgid().as_raw();
 
-    // Container-internal paths mirror the host home directory so that
-    // bind mounts preserve ownership and file permissions.
-    let c_claude_bin = format!("{home_str}/.local/bin/claude");
+    // Container-internal paths mirror the host so bind mounts preserve permissions.
+    let c_bin_dir = claude_bin_dir.to_string_lossy();
     let c_session_dir = format!("{home_str}/sessions/{name}");
     let c_claude_dir = format!("{home_str}/.claude");
     let c_claude_json = format!("{home_str}/.claude.json");
@@ -63,21 +71,21 @@ pub fn build_run_command(
         &format!("--hostname={hostname}"),
         &format!("--userns=keep-id:uid={uid},gid={gid}"),
         &format!("--user={uid}:{gid}"),
-        "--entrypoint",
-        &c_claude_bin,
     ]);
 
-    // Bind mounts
-    cmd.arg(format!("-v={}:{c_claude_bin}:ro,z", claude_bin.display()));
-    cmd.arg(format!("-v={}:{c_session_dir}:rw,z", session_dir.display()));
-    cmd.arg(format!("-v={}:{c_claude_dir}:rw,z", claude_dir.display()));
-    cmd.arg(format!("-v={}:{c_claude_json}:rw,z", claude_json.display()));
+    // Mount the directory containing claude (not the file itself) to avoid
+    // SELinux relabeling and symlink issues that cause Permission denied.
+    cmd.arg(format!("-v={c_bin_dir}:{c_bin_dir}:ro"));
+    cmd.arg(format!("-v={}:{c_session_dir}:rw", session_dir.display()));
+    cmd.arg(format!("-v={}:{c_claude_dir}:rw", claude_dir.display()));
+    cmd.arg(format!("-v={}:{c_claude_json}:rw", claude_json.display()));
 
     // Environment
     cmd.args(["-e", &format!("HOME={home_str}")]);
+    cmd.args(["-e", &format!("PATH={c_bin_dir}:/usr/local/bin:/usr/bin:/bin")]);
     cmd.args(["-e", "LANG=en_US.UTF-8"]);
-    cmd.args(["-e", &format!("USER={}", std::env::var("USER").unwrap_or_else(|_| "claude".into()))]);
-    cmd.args(["-e", &format!("LOGNAME={}", std::env::var("USER").unwrap_or_else(|_| "claude".into()))]);
+    cmd.args(["-e", &format!("USER={user}")]);
+    cmd.args(["-e", &format!("LOGNAME={user}")]);
     cmd.args(["-e", "SHELL=/bin/bash"]);
     cmd.args(["-e", "DISABLE_AUTOUPDATER=1"]);
 
@@ -87,7 +95,9 @@ pub fn build_run_command(
     // Image
     cmd.arg(image);
 
-    // Claude CLI args
+    // Command: run claude directly (not via --entrypoint, which has
+    // issues with catatonit + bind-mounted binaries on some systems)
+    cmd.arg(&claude_bin_name);
     cmd.args(claude_args);
 
     cmd
@@ -190,13 +200,27 @@ mod tests {
     }
 
     #[test]
-    fn build_run_command_uses_entrypoint() {
+    fn build_run_command_has_claude_command() {
         let args = test_cmd("test", "ubuntu", "/tmp/s", &[]);
-        let ep_idx = args.iter().position(|a| a == "--entrypoint").unwrap();
-        let home = home_dir();
-        let expected = format!("{}/.local/bin/claude", home.display());
-        assert!(args[ep_idx + 1].contains(".local/bin/claude") || args[ep_idx + 1] == expected,
-            "unexpected entrypoint: {}", args[ep_idx + 1]);
+        // claude binary name should appear after the image name
+        let img_idx = args.iter().position(|a| a == "ubuntu").unwrap();
+        let cmd_name = &args[img_idx + 1];
+        assert!(cmd_name.contains("claude"), "expected claude command after image, got: {cmd_name}");
+    }
+
+    #[test]
+    fn build_run_command_has_no_entrypoint() {
+        let args = test_cmd("test", "ubuntu", "/tmp/s", &[]);
+        assert!(!args.contains(&"--entrypoint".to_string()),
+            "should not use --entrypoint, args: {args:?}");
+    }
+
+    #[test]
+    fn build_run_command_mounts_bin_dir_readonly() {
+        let args = test_cmd("test", "ubuntu", "/tmp/s", &[]);
+        // The claude binary's parent directory should be mounted read-only (no :z)
+        let ro_mount = args.iter().find(|a| a.starts_with("-v=") && a.ends_with(":ro"));
+        assert!(ro_mount.is_some(), "missing read-only bin dir mount, args: {args:?}");
     }
 
     #[test]
