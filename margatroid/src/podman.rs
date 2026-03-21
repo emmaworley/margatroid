@@ -27,6 +27,9 @@ pub fn build_run_command(
         .map(|h| h.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "unknown".into());
 
+    let uid = nix::unistd::getuid().as_raw();
+    let gid = nix::unistd::getgid().as_raw();
+
     let mut cmd = Command::new("podman");
     cmd.args([
         "run",
@@ -35,8 +38,8 @@ pub fn build_run_command(
         "--init",
         &format!("--name=margatroid-{name}"),
         &format!("--hostname={hostname}"),
-        "--userns=keep-id:uid=1001,gid=1001",
-        "--user=1001:1001",
+        &format!("--userns=keep-id:uid={uid},gid={gid}"),
+        &format!("--user={uid}:{gid}"),
         "--entrypoint",
         "/home/claude/.local/bin/claude",
     ]);
@@ -193,5 +196,19 @@ mod tests {
 
         let ep_idx = args.iter().position(|a| a == "--entrypoint").unwrap();
         assert_eq!(args[ep_idx + 1], "/home/claude/.local/bin/claude");
+    }
+
+    #[test]
+    fn build_run_command_uses_current_uid() {
+        let session_dir = PathBuf::from("/tmp/sessions/test");
+        let cmd = build_run_command("test", "ubuntu", &session_dir, &[]);
+        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+
+        let uid = nix::unistd::getuid().as_raw();
+        let gid = nix::unistd::getgid().as_raw();
+        let expected_userns = format!("--userns=keep-id:uid={uid},gid={gid}");
+        let expected_user = format!("--user={uid}:{gid}");
+        assert!(args.contains(&expected_userns), "missing userns with current uid");
+        assert!(args.contains(&expected_user), "missing user with current uid");
     }
 }
