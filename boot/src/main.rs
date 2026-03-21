@@ -36,7 +36,6 @@ fn main() {
             tracing::error!("failed to create tmux session: {e}");
             std::process::exit(1);
         }
-        tmux::lock_session().ok();
         tracing::info!("created tmux session '{TMUX_SESSION}'");
     } else {
         // Session exists — reload config

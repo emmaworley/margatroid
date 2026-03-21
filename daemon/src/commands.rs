@@ -18,17 +18,7 @@ pub fn handle_command(input: &str) -> String {
 
     match cmd.to_lowercase().as_str() {
         "list" | "ls" => cmd_list(),
-        "start" => {
-            if parts.len() < 2 {
-                "Usage: `/start <name> [image]`".to_string()
-            } else if !is_valid_session_name(parts[1]) {
-                "Invalid name: use only letters, numbers, hyphens, underscores.".to_string()
-            } else {
-                let name = parts[1];
-                let image = parts.get(2).copied().unwrap_or("ubuntu");
-                cmd_start(name, image)
-            }
-        }
+        "start" => parse_start(&parts),
         "stop" => {
             if parts.len() < 2 {
                 "Usage: `/stop <name>`".to_string()
@@ -114,6 +104,41 @@ fn cmd_list() -> String {
             out
         }
         Err(e) => format!("Error listing sessions: {e}"),
+    }
+}
+
+fn parse_start(parts: &[&str]) -> String {
+    if parts.len() < 3 {
+        return "Usage: `/start <name> <--image=IMAGE|--host>`\n\n\
+                Examples:\n\
+                - `/start myproject --image=ubuntu`\n\
+                - `/start myproject --image=node:22`\n\
+                - `/start myproject --host`"
+            .to_string();
+    }
+    let name = parts[1];
+    if !is_valid_session_name(name) {
+        return "Invalid name: use only letters, numbers, hyphens, underscores.".to_string();
+    }
+    // Look for --image= or --host in remaining args
+    let mut image: Option<&str> = None;
+    let mut host = false;
+    for &part in &parts[2..] {
+        if let Some(img) = part.strip_prefix("--image=") {
+            image = Some(img);
+        } else if part == "--host" {
+            host = true;
+        }
+    }
+    if host {
+        cmd_start(name, "host")
+    } else if let Some(img) = image {
+        if img.is_empty() {
+            return "Usage: `--image=IMAGE` requires a value".to_string();
+        }
+        cmd_start(name, img)
+    } else {
+        "Usage: `/start <name> <--image=IMAGE|--host>`".to_string()
     }
 }
 
@@ -215,11 +240,12 @@ fn cmd_images() -> String {
 }
 
 fn help_text() -> String {
-    "## Orchestrator Commands\n\n\
+    "## Commands\n\n\
      | Command | Description |\n\
      |---------|-------------|\n\
      | `/list` | List all sessions |\n\
-     | `/start <name> [image]` | Start a new session |\n\
+     | `/start <name> --image=IMAGE` | Start a containerized session |\n\
+     | `/start <name> --host` | Start an uncontainerized session |\n\
      | `/stop <name>` | Stop a running session |\n\
      | `/restart <name>` | Restart a session |\n\
      | `/delete <name> [--data]` | Delete a session |\n\
@@ -236,20 +262,20 @@ mod tests {
     #[test]
     fn help_command() {
         let result = handle_command("/help");
-        assert!(result.contains("Orchestrator Commands"));
+        assert!(result.contains("Commands"));
         assert!(result.contains("/list"));
     }
 
     #[test]
     fn help_with_question_mark() {
         let result = handle_command("?");
-        assert!(result.contains("Orchestrator Commands"));
+        assert!(result.contains("Commands"));
     }
 
     #[test]
     fn empty_input_shows_help() {
         let result = handle_command("");
-        assert!(result.contains("Orchestrator Commands"));
+        assert!(result.contains("Commands"));
     }
 
     #[test]
@@ -260,21 +286,33 @@ mod tests {
     }
 
     #[test]
-    fn start_missing_name() {
+    fn start_missing_args() {
         let result = handle_command("/start");
         assert!(result.contains("Usage:"));
     }
 
     #[test]
+    fn start_missing_mode() {
+        let result = handle_command("/start myproject");
+        assert!(result.contains("Usage:"));
+    }
+
+    #[test]
     fn start_invalid_name() {
-        let result = handle_command("/start bad;name");
+        let result = handle_command("/start bad;name --host");
         assert!(result.contains("Invalid name"));
     }
 
     #[test]
     fn start_with_special_chars() {
-        let result = handle_command("/start ../escape");
+        let result = handle_command("/start ../escape --host");
         assert!(result.contains("Invalid name"));
+    }
+
+    #[test]
+    fn start_empty_image() {
+        let result = handle_command("/start myproject --image=");
+        assert!(result.contains("requires a value"));
     }
 
     #[test]
@@ -322,13 +360,13 @@ mod tests {
     #[test]
     fn command_without_slash_prefix() {
         let result = handle_command("help");
-        assert!(result.contains("Orchestrator Commands"));
+        assert!(result.contains("Commands"));
     }
 
     #[test]
     fn command_case_insensitive() {
         let result = handle_command("/HELP");
-        assert!(result.contains("Orchestrator Commands"));
+        assert!(result.contains("Commands"));
 
         let result2 = handle_command("/List");
         // /list will try to list sessions, not return "Unknown command"
@@ -338,6 +376,6 @@ mod tests {
     #[test]
     fn whitespace_trimmed() {
         let result = handle_command("  /help  ");
-        assert!(result.contains("Orchestrator Commands"));
+        assert!(result.contains("Commands"));
     }
 }

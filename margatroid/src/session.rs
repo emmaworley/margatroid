@@ -134,9 +134,13 @@ pub fn setup(name: &str) -> Result<PathBuf> {
 }
 
 /// Full launch sequence: setup, register, rename tmux window, fork helper, exec into podman.
-/// This function does NOT return on success (it execs into podman).
+/// This function does NOT return on success (it execs into podman or claude).
 pub fn launch(name: &str, image_input: &str, inject_resume: bool) -> Result<()> {
+    tracing::info!(name, image = image_input, "launching session");
+
     let session_dir = setup(name)?;
+    tracing::debug!(dir = %session_dir.display(), "session directory ready");
+
     let resolved_image = image::resolve(image_input);
 
     state::register(name, image_input)?;
@@ -161,15 +165,18 @@ pub fn launch(name: &str, image_input: &str, inject_resume: bool) -> Result<()> 
 
     let should_inject = match &resume_action {
         discovery::ResumeAction::Fresh => {
+            tracing::info!(name, "starting fresh session");
             eprintln!("  Starting fresh session...");
             false
         }
         discovery::ResumeAction::ResumeClean(uuid) => {
+            tracing::info!(name, uuid = &uuid[..8.min(uuid.len())], "resuming clean session");
             eprintln!("  Resuming session {}...", uuid.get(..8).unwrap_or(uuid));
             claude_args.extend(["--resume".to_string(), uuid.clone()]);
             false
         }
         discovery::ResumeAction::ResumeInterrupted(uuid) => {
+            tracing::info!(name, uuid = &uuid[..8.min(uuid.len())], "resuming interrupted session");
             eprintln!(
                 "  Resuming interrupted session {}...",
                 uuid.get(..8).unwrap_or(uuid)
@@ -182,10 +189,12 @@ pub fn launch(name: &str, image_input: &str, inject_resume: bool) -> Result<()> 
 
     // Fork remote-control helper
     remote_control::fork_helper(name, &session_dir, inject_resume || should_inject)?;
+    tracing::debug!(name, "remote-control helper forked");
 
     if image_input == "host" {
         // Uncontainerized: exec claude directly on the host
         let claude_bin = crate::home_dir().join(".local/bin/claude");
+        tracing::info!(name, bin = %claude_bin.display(), "exec claude (host mode)");
         let mut cmd = std::process::Command::new(claude_bin);
         cmd.args(&claude_args);
         cmd.current_dir(&session_dir);
@@ -197,6 +206,7 @@ pub fn launch(name: &str, image_input: &str, inject_resume: bool) -> Result<()> 
     podman::remove_stale(name)?;
 
     // Exec into podman (replaces this process)
+    tracing::info!(name, image = %resolved_image, "exec podman");
     let mut cmd = podman::build_run_command(name, &resolved_image, &session_dir, &claude_args);
 
     let err = exec_command(&mut cmd);
