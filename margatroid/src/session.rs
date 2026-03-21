@@ -206,8 +206,14 @@ pub fn launch(name: &str, image_input: &str, inject_resume: bool) -> Result<()> 
     podman::remove_stale(name)?;
 
     // Exec into podman (replaces this process)
-    tracing::info!(name, image = %resolved_image, "exec podman");
     let mut cmd = podman::build_run_command(name, &resolved_image, &session_dir, &claude_args);
+    tracing::info!(
+        name,
+        image = %resolved_image,
+        program = ?cmd.get_program(),
+        args = ?cmd.get_args().collect::<Vec<_>>(),
+        "exec podman"
+    );
 
     let err = exec_command(&mut cmd);
     Err(SessionError::Other(format!("exec failed: {err}")))

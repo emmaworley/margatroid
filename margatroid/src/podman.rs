@@ -67,6 +67,7 @@ pub fn build_run_command(
         "--rm",
         "-it",
         "--init",
+        "--security-opt", "label=disable",
         &format!("--name=margatroid-{name}"),
         &format!("--hostname={hostname}"),
         &format!("--userns=keep-id:uid={uid},gid={gid}"),

@@ -2,8 +2,7 @@
 
 use crate::views::{confirm, create, detail, session_list};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
-use crossterm::execute;
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use margatroid::session::{self, Session};
 use ratatui::prelude::*;
 use std::io::stdout;
@@ -73,7 +72,6 @@ pub enum RunResult {
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
-    execute!(stdout(), EnterAlternateScreen)?;
 
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
@@ -125,12 +123,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 // The manager pane stays alive — sessions always open in their own pane.
                 if let Err(e) = session::setup(&name) {
                     disable_raw_mode()?;
-                    execute!(stdout(), LeaveAlternateScreen)?;
                     return Err(format!("Setup failed: {e}").into());
                 }
                 if let Err(e) = margatroid::state::register(&name, &image) {
                     disable_raw_mode()?;
-                    execute!(stdout(), LeaveAlternateScreen)?;
                     return Err(format!("Registration failed: {e}").into());
                 }
                 let _ = margatroid::image::record_usage(&image);
@@ -140,7 +136,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                 if let Err(e) = margatroid::tmux::new_window(&name, &[&tui_path, &name, &image]) {
                     disable_raw_mode()?;
-                    execute!(stdout(), LeaveAlternateScreen)?;
                     return Err(format!("Failed to start: {e}").into());
                 }
 
