@@ -83,6 +83,16 @@ fn helper_main(name: &str, session_dir: &Path, inject_resume: bool) {
     tracing::info!("sending /remote-control to {name}");
     let _ = tmux::send_keys(&target, &["/remote-control", "Enter"]);
 
+    // Claude Code shows a confirmation prompt after /remote-control.
+    // Wait for it to appear, then send Enter to confirm.
+    if wait_for_text(&target, Duration::from_secs(30), &["y/n", "Y/n", "confirm", "Enter"]) {
+        tracing::info!("confirming remote-control for {name}");
+        let _ = tmux::send_keys(&target, &["y", "Enter"]);
+    } else {
+        tracing::warn!("no confirmation prompt detected for {name}, sending Enter anyway");
+        let _ = tmux::send_keys(&target, &["Enter"]);
+    }
+
     // Wait for bridge-pointer.json to appear
     let slug = session_dir.to_string_lossy().replace('/', "-");
     let bridge_file = home_dir()
@@ -103,11 +113,15 @@ fn helper_main(name: &str, session_dir: &Path, inject_resume: bool) {
 }
 
 fn wait_for_prompt(target: &str, timeout: Duration) -> bool {
+    wait_for_text(target, timeout, &["\u{276f}", "❯"])
+}
+
+fn wait_for_text(target: &str, timeout: Duration, needles: &[&str]) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         thread::sleep(Duration::from_secs(2));
         if let Ok(content) = tmux::capture_pane(target) {
-            if content.contains('\u{276f}') || content.contains('❯') {
+            if needles.iter().any(|n| content.contains(n)) {
                 return true;
             }
         }
