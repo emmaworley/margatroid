@@ -219,10 +219,33 @@ pub fn launch(name: &str, image_input: &str, inject_resume: bool) -> Result<()> 
     Err(SessionError::Other(format!("exec failed: {err}")))
 }
 
-/// Stop a running session's container.
+/// Stop a running session. For containerized sessions, stops the podman
+/// container. For host sessions, sends /exit to Claude Code via tmux
+/// and waits for it to deregister gracefully.
 pub fn stop(name: &str) -> Result<()> {
-    podman::stop(name)?;
-    podman::rm(name)?;
+    let sessions = state::load()?;
+    let is_host = sessions
+        .get(name)
+        .map(|s| s.image == "host")
+        .unwrap_or(false);
+
+    if is_host {
+        // Send /exit to Claude Code and give it time to deregister
+        let target = format!("{}:{name}", crate::TMUX_SESSION);
+        let _ = tmux::send_keys(&target, &["/exit", "Enter"]);
+        // Wait up to 10s for the pane process to exit
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            if !tmux::running_window_names().contains(name) {
+                return Ok(());
+            }
+        }
+        // Force kill if still running
+        let _ = tmux::send_keys(&target, &["q"]);
+    } else {
+        podman::stop(name)?;
+        podman::rm(name)?;
+    }
     Ok(())
 }
 
