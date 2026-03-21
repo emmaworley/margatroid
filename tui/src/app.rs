@@ -101,14 +101,21 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 continue;
             }
 
-            if let Event::Key(key) = event::read()? {
-                if key.kind != KeyEventKind::Press {
-                    continue;
+            match event::read()? {
+                Event::Key(key) => {
+                    if key.kind != KeyEventKind::Press {
+                        continue;
+                    }
+                    if let Some(RunResult::Launch { name, image }) = handle_key(&mut app, key.code) {
+                        break RunResult::Launch { name, image };
+                    }
                 }
-
-                if let Some(RunResult::Launch { name, image }) = handle_key(&mut app, key.code) {
-                    break RunResult::Launch { name, image };
+                Event::Resize(_, _) => {
+                    // tmux sends SIGWINCH on attach — force a full redraw
+                    // so the screen isn't blank after reattaching.
+                    terminal.clear()?;
                 }
+                _ => {}
             }
         };
 
