@@ -181,11 +181,14 @@ systemctl --user enable --now margatroid-daemon.service 2>/dev/null || true
 systemctl --user enable --now margatroid-update.timer 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
-# On update: restart the daemon so it picks up the new binary.
-# This does NOT affect running container sessions — they live in tmux.
+# On update: restart services so they pick up the new binaries.
+# The boot service recreates the tmux session with the new TUI.
+# Running container sessions are independent podman processes — they
+# survive the tmux restart and get re-attached to new windows.
 # ---------------------------------------------------------------------------
 
 if [ "$MODE" = update ]; then
+    systemctl --user restart margatroid-tmux.service 2>/dev/null || true
     systemctl --user restart margatroid-daemon.service 2>/dev/null || true
     NEW_VERSION=$(git -C "$INSTALL_DIR" log -1 --format='%h %s')
     info "Updated to: $NEW_VERSION"
