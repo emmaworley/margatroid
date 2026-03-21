@@ -91,6 +91,14 @@ To update manually:
 ~/.margatroid/install.sh
 ```
 
+### Uninstall
+
+```sh
+~/.margatroid/uninstall.sh
+```
+
+Stops services, removes binaries and systemd units. Session data in `~/sessions/` is preserved unless you remove it manually.
+
 ## Building from source
 
 ```sh
