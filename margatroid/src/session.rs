@@ -154,7 +154,8 @@ pub fn launch(name: &str, image_input: &str, inject_resume: bool) -> Result<()> 
     let hostname = hostname::get()
         .map(|h| h.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "unknown".into());
-    let session_name = format!("{hostname}: {name}");
+    let user = std::env::var("USER").unwrap_or_else(|_| "unknown".into());
+    let session_name = format!("{user}@{hostname}: {name}");
 
     let mut claude_args = vec!["--name".to_string(), session_name];
 
@@ -179,11 +180,21 @@ pub fn launch(name: &str, image_input: &str, inject_resume: bool) -> Result<()> 
     };
     eprintln!();
 
-    // Clean up stale container
-    podman::remove_stale(name)?;
-
     // Fork remote-control helper
     remote_control::fork_helper(name, &session_dir, inject_resume || should_inject)?;
+
+    if image_input == "host" {
+        // Uncontainerized: exec claude directly on the host
+        let claude_bin = crate::home_dir().join(".local/bin/claude");
+        let mut cmd = std::process::Command::new(claude_bin);
+        cmd.args(&claude_args);
+        cmd.current_dir(&session_dir);
+        let err = exec_command(&mut cmd);
+        return Err(SessionError::Other(format!("exec failed: {err}")));
+    }
+
+    // Clean up stale container
+    podman::remove_stale(name)?;
 
     // Exec into podman (replaces this process)
     let mut cmd = podman::build_run_command(name, &resolved_image, &session_dir, &claude_args);

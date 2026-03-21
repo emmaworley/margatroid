@@ -47,7 +47,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Create session with a durable, recognizable name
-    let session_name = format!("{hostname} Session Manager");
+    let user = std::env::var("USER").unwrap_or_else(|_| "unknown".into());
+    let session_name = format!("{user}@{hostname} Session Manager");
     info!(name = %session_name, "creating session");
     let manager_session_id = {
         let c = client.lock().await;

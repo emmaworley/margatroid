@@ -74,6 +74,13 @@ pub fn create_session_with_config(initial_window: &str, config: &str, cmd: &[&st
     Ok(())
 }
 
+/// Lock down the session: keep panes alive if their process exits,
+/// so the TUI survives crashes and can't be accidentally closed.
+pub fn lock_session() -> Result<()> {
+    let _ = run(&["set-option", "-t", TMUX_SESSION, "remain-on-exit", "on"]);
+    Ok(())
+}
+
 /// Source a tmux config file.
 pub fn source_config(config: &str) -> Result<()> {
     run(&["source-file", config])?;

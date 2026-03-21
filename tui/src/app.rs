@@ -14,6 +14,7 @@ pub enum View {
     CreateImage,
     CreateName,
     CreateCustomImage,
+    ConfirmHost,
     Detail(usize),
     ConfirmDelete(usize),
 }
@@ -53,19 +54,20 @@ impl App {
     }
 
     /// Get the image items for the create flow.
+    /// The last two items are always "Enter custom image..." and "No container (host)".
     pub fn image_items(&self) -> Vec<String> {
         let mut items = self.mru_images.clone();
         if items.is_empty() {
             items.push("ubuntu".to_string());
         }
         items.push("Enter custom image...".to_string());
+        items.push("No container (host)".to_string());
         items
     }
 }
 
-/// Launch result — either we stay in the TUI or we need to exec into a session.
+/// Launch result from the TUI event loop.
 pub enum RunResult {
-    Quit,
     Launch { name: String, image: String },
 }
 
@@ -104,23 +106,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     continue;
                 }
 
-                match handle_key(&mut app, key.code) {
-                    Some(RunResult::Quit) => break RunResult::Quit,
-                    Some(RunResult::Launch { name, image }) => {
-                        break RunResult::Launch { name, image };
-                    }
-                    None => {}
+                if let Some(RunResult::Launch { name, image }) = handle_key(&mut app, key.code) {
+                    break RunResult::Launch { name, image };
                 }
             }
         };
 
         match result {
-            RunResult::Quit => {
-                // Restore terminal
-                disable_raw_mode()?;
-                execute!(stdout(), LeaveAlternateScreen)?;
-                return Ok(());
-            }
             RunResult::Launch { name, image } => {
                 // Setup session and launch in a new tmux window.
                 // The manager pane stays alive — sessions always open in their own pane.
@@ -160,6 +152,7 @@ fn draw(app: &App, frame: &mut Frame) {
         View::CreateImage => create::draw_image(app, frame),
         View::CreateName => create::draw_name(app, frame),
         View::CreateCustomImage => create::draw_custom_image(app, frame),
+        View::ConfirmHost => create::draw_confirm_host(app, frame),
         View::Detail(idx) => detail::draw(app, *idx, frame),
         View::ConfirmDelete(idx) => confirm::draw(app, *idx, frame),
     }
@@ -171,6 +164,10 @@ fn handle_key(app: &mut App, key: KeyCode) -> Option<RunResult> {
         View::CreateImage => create::handle_key_image(app, key),
         View::CreateName => create::handle_key_name(app, key),
         View::CreateCustomImage => create::handle_key_custom_image(app, key),
+        View::ConfirmHost => {
+            create::handle_key_confirm_host(app, key);
+            None
+        }
         View::Detail(_) => {
             detail::handle_key(app, key);
             None

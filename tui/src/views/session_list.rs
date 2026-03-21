@@ -71,7 +71,7 @@ pub fn draw(app: &App, frame: &mut Frame) {
 
     // Help bar
     let help = Paragraph::new(
-        " ↑↓ navigate  Enter resume  n new  s stop  r restart  d delete  i info  q quit",
+        " ↑↓ navigate  Enter resume  n new  s stop  r restart  d delete  i info",
     )
     .style(Style::default().fg(Color::Yellow));
     frame.render_widget(help, chunks[2]);
@@ -95,7 +95,6 @@ pub fn handle_key(app: &mut App, key: KeyCode) -> Option<RunResult> {
     app.status_message = None;
 
     match key {
-        KeyCode::Char('q') => return Some(RunResult::Quit),
         KeyCode::Up | KeyCode::Char('k') => {
             if app.cursor > 0 {
                 app.cursor -= 1;

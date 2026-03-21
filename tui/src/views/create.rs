@@ -27,14 +27,14 @@ pub fn draw_image(app: &App, frame: &mut Frame) {
     frame.render_widget(label, chunks[1]);
 
     let items = app.image_items();
+    let special_count = 2; // "Enter custom image..." and "No container (host)"
     let list_items: Vec<ListItem> = items
         .iter()
         .enumerate()
         .map(|(i, name)| {
             let style = if i == app.cursor {
                 Style::default().bg(Color::Cyan).fg(Color::Black)
-            } else if i == items.len() - 1 {
-                // "Enter custom image..." in different color
+            } else if i >= items.len() - special_count {
                 Style::default().fg(Color::Yellow)
             } else {
                 Style::default()
@@ -70,6 +70,9 @@ pub fn handle_key_image(app: &mut App, key: KeyCode) -> Option<RunResult> {
         }
         KeyCode::Enter => {
             if app.cursor == items.len() - 1 {
+                // No container (host)
+                app.view = View::ConfirmHost;
+            } else if app.cursor == items.len() - 2 {
                 // Custom image
                 app.custom_img_buf.clear();
                 app.view = View::CreateCustomImage;
@@ -200,4 +203,54 @@ pub fn handle_key_name(app: &mut App, key: KeyCode) -> Option<RunResult> {
         _ => {}
     }
     None
+}
+
+// --- Host (uncontainerized) confirmation ---
+
+pub fn draw_confirm_host(app: &App, frame: &mut Frame) {
+    let area = frame.area();
+    let chunks = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Length(2),
+        Constraint::Length(4),
+        Constraint::Min(1),
+        Constraint::Length(2),
+    ])
+    .split(area);
+
+    let title = Paragraph::new(" Claude Session Manager")
+        .style(Style::default().fg(Color::Cyan).bold());
+    frame.render_widget(title, chunks[0]);
+
+    let warn_label = Paragraph::new("  Warning: Uncontainerized session")
+        .style(Style::default().fg(Color::Yellow).bold());
+    frame.render_widget(warn_label, chunks[1]);
+
+    let _ = app; // suppress unused warning in draw context
+    let warn_body = Paragraph::new(
+        "  Claude Code will run directly on the host with full access to\n  \
+         the filesystem, network, and installed tools. There is no\n  \
+         container isolation.",
+    )
+    .style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(warn_body, chunks[2]);
+
+    let help = Paragraph::new(" Enter confirm  Esc back")
+        .style(Style::default().fg(Color::Yellow));
+    frame.render_widget(help, chunks[4]);
+}
+
+pub fn handle_key_confirm_host(app: &mut App, key: KeyCode) {
+    match key {
+        KeyCode::Esc => {
+            app.cursor = 0;
+            app.view = View::CreateImage;
+        }
+        KeyCode::Enter => {
+            app.selected_image = "host".to_string();
+            app.name_buf.clear();
+            app.view = View::CreateName;
+        }
+        _ => {}
+    }
 }
