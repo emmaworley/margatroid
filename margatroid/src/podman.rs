@@ -55,9 +55,11 @@ pub fn build_run_command(
     let uid = nix::unistd::getuid().as_raw();
     let gid = nix::unistd::getgid().as_raw();
 
-    // Container-internal paths mirror the host so bind mounts preserve permissions.
+    // Container-internal paths mirror the host so bind mounts preserve permissions
+    // and trust entries in ~/.claude.json match.
+    let margatroid = crate::margatroid_dir();
     let c_bin_dir = claude_bin_dir.to_string_lossy();
-    let c_session_dir = format!("{home_str}/sessions/{name}");
+    let c_session_dir = format!("{}/sessions/{name}", margatroid.display());
     let c_claude_dir = format!("{home_str}/.claude");
     let c_claude_json = format!("{home_str}/.claude.json");
 
@@ -171,8 +173,8 @@ mod tests {
     #[test]
     fn build_run_command_has_workdir() {
         let args = test_cmd("myproj", "debian", "/tmp/s", &[]);
-        let home = home_dir();
-        let expected = format!("-w={}/sessions/myproj", home.display());
+        let mdir = crate::margatroid_dir();
+        let expected = format!("-w={}/sessions/myproj", mdir.display());
         assert!(args.contains(&expected), "missing workdir, args: {args:?}");
     }
 
