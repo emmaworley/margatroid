@@ -5,7 +5,7 @@
 //! Creates the shared tmux session, restores saved sessions from
 //! sessions.json, and stays alive polling for tmux session existence.
 
-use margatroid::{home_dir, state, tmux, TMUX_SESSION};
+use margatroid::{home_dir, margatroid_dir, state, tmux, TMUX_SESSION};
 use std::thread;
 use std::time::Duration;
 
@@ -51,7 +51,7 @@ fn main() {
         }
     };
 
-    let tui_bin = home_dir().join(".margatroid/bin/margatroid-tui");
+    let tui_bin = margatroid_dir().join("bin/margatroid-tui");
     let tui_path = tui_bin.to_string_lossy().into_owned();
 
     for (name, info) in &sessions {

@@ -1,13 +1,13 @@
 //! Image resolution and MRU (most recently used) history.
 
-use crate::home_dir;
+use crate::margatroid_dir;
 use std::fs;
 use std::path::PathBuf;
 
 const MAX_MRU: usize = 10;
 
 fn mru_file() -> PathBuf {
-    home_dir().join(".config/margatroid/image-mru.json")
+    margatroid_dir().join("state/image-mru.json")
 }
 
 /// Resolve user input to a full image reference.

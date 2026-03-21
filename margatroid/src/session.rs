@@ -1,6 +1,6 @@
 //! High-level session operations tying together all modules.
 
-use crate::{claude_config, discovery, home_dir, image, podman, remote_control, state, tmux};
+use crate::{claude_config, discovery, image, margatroid_dir, podman, remote_control, state, tmux};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -45,7 +45,7 @@ type Result<T> = std::result::Result<T, SessionError>;
 pub fn list_all() -> Result<Vec<Session>> {
     let saved = state::load()?;
     let running = tmux::running_window_names();
-    let sessions_dir = home_dir().join("sessions");
+    let sessions_dir = margatroid_dir().join("sessions");
 
     let mut result: HashMap<String, Session> = HashMap::new();
 
@@ -127,7 +127,7 @@ pub fn list_all() -> Result<Vec<Session>> {
 
 /// Set up host directories, trust, and CLAUDE.md for a session.
 pub fn setup(name: &str) -> Result<PathBuf> {
-    let session_dir = home_dir().join("sessions").join(name);
+    let session_dir = margatroid_dir().join("sessions").join(name);
     claude_config::ensure_trusted(&session_dir)?;
     claude_config::write_claude_md(&session_dir, name)?;
     Ok(session_dir)
@@ -211,7 +211,7 @@ pub fn restart(name: &str) -> Result<()> {
     stop(name)?;
 
     // Launch in a new tmux window
-    let tui_bin = home_dir().join(".margatroid/bin/margatroid-tui");
+    let tui_bin = margatroid_dir().join("bin/margatroid-tui");
     let tui_path = tui_bin.to_string_lossy().into_owned();
     tmux::new_window(name, &[&tui_path, name, &image])?;
 
@@ -227,7 +227,7 @@ pub fn delete(name: &str, remove_data: bool) -> Result<()> {
     state::deregister(name)?;
 
     if remove_data {
-        let session_dir = home_dir().join("sessions").join(name);
+        let session_dir = margatroid_dir().join("sessions").join(name);
         if session_dir.is_dir() {
             fs::remove_dir_all(&session_dir)?;
         }

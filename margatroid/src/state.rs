@@ -1,7 +1,7 @@
-//! Persistent session state in `~/.config/margatroid/sessions.json`.
+//! Persistent session state in `~/.margatroid/state/sessions.json`.
 //! All mutations are protected by flock.
 
-use crate::home_dir;
+use crate::margatroid_dir;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -25,11 +25,11 @@ pub enum StateError {
 type Result<T> = std::result::Result<T, StateError>;
 
 fn sessions_file() -> PathBuf {
-    home_dir().join(".config/margatroid/sessions.json")
+    margatroid_dir().join("state/sessions.json")
 }
 
 fn lock_file() -> PathBuf {
-    home_dir().join(".config/margatroid/sessions.json.lock")
+    margatroid_dir().join("state/sessions.json.lock")
 }
 
 /// Load sessions from disk (no locking).

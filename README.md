@@ -97,7 +97,7 @@ To update manually:
 ~/.margatroid/uninstall.sh
 ```
 
-Stops services, removes binaries and systemd units. Session data in `~/sessions/` is preserved unless you remove it manually.
+Stops services, removes systemd units, and deletes `~/.margatroid` (source, binaries, state, and session data).
 
 ## Building from source
 
@@ -113,10 +113,10 @@ Binaries are produced in `target/release/`:
 
 ## Session Lifecycle
 
-1. **Boot** creates the shared tmux session and restores any previously saved sessions from `~/.config/margatroid/sessions.json`.
+1. **Boot** creates the shared tmux session and restores any previously saved sessions from `~/.margatroid/state/sessions.json`.
 
 2. **Sessions are created** via the TUI (`/start <name> [image]`) or the remote control web UI. Each session gets:
-   - A working directory at `~/sessions/<name>/`
+   - A working directory at `~/.margatroid/sessions/<name>/`
    - A Podman container running the specified image
    - A tmux window within the shared `margatroid` session
    - Claude Code running inside the container with `/remote-control` mode
@@ -154,7 +154,7 @@ The daemon exposes these commands via the claude.ai/code web interface:
 ### Persistent State
 
 ```
-~/.config/margatroid/
+~/.margatroid/state/
   sessions.json                # Active sessions (name → image)
   image-mru.json               # Most recently used images
 ```
@@ -162,7 +162,7 @@ The daemon exposes these commands via the claude.ai/code web interface:
 ### Session Data
 
 ```
-~/sessions/<name>/             # Per-session working directory (mounted into container)
+~/.margatroid/sessions/<name>/ # Per-session working directory (mounted into container)
 ```
 
 ## Bridge Protocol
