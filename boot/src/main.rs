@@ -51,7 +51,7 @@ fn main() {
         }
     };
 
-    let tui_bin = home_dir().join("bin/margatroid-tui");
+    let tui_bin = home_dir().join(".margatroid/bin/margatroid-tui");
     let tui_path = tui_bin.to_string_lossy().into_owned();
 
     for (name, info) in &sessions {

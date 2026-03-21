@@ -4,8 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-Environment=PATH=%h/.cargo/bin:%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=%h/bin/margatroid-boot
+Environment=PATH=%h/.margatroid/bin:%h/.cargo/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.margatroid/bin/margatroid-boot
 ExecStop=/usr/bin/tmux kill-session -t margatroid
 Restart=always
 RestartSec=5

@@ -66,15 +66,15 @@ margatroid (lib)            bridge (lib)
 curl -fsSL https://raw.githubusercontent.com/emmaworley/margatroid/main/install.sh | bash
 ```
 
-This clones the repo to `~/.margatroid`, builds from source, installs binaries to `~/bin/`, and enables systemd user services.
+This clones the repo to `~/.margatroid`, builds from source, and enables systemd user services. Everything lives under `~/.margatroid`.
 
 ### What gets installed
 
 ```
-~/bin/margatroid-{boot,daemon,tui,cleanup}          # Binaries
-~/.config/systemd/user/margatroid-tmux.service       # Session manager service
-~/.config/systemd/user/margatroid-daemon.service     # Bridge daemon service
-~/.config/systemd/user/margatroid-update.{service,timer}  # Auto-update
+~/.margatroid/bin/margatroid-{boot,daemon,tui,cleanup}    # Binaries
+~/.config/systemd/user/margatroid-tmux.service             # Session manager service
+~/.config/systemd/user/margatroid-daemon.service           # Bridge daemon service
+~/.config/systemd/user/margatroid-update.{service,timer}   # Auto-update
 ```
 
 ### Updates

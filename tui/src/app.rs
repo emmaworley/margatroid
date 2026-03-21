@@ -137,7 +137,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let _ = margatroid::image::record_usage(&image);
 
                 let home = margatroid::home_dir();
-                let tui_bin = home.join("bin/margatroid-tui");
+                let tui_bin = home.join(".margatroid/bin/margatroid-tui");
                 let tui_path = tui_bin.to_string_lossy().into_owned();
 
                 if let Err(e) = margatroid::tmux::new_window(&name, &[&tui_path, &name, &image]) {

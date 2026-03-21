@@ -4,9 +4,9 @@ After=network.target margatroid-tmux.service
 
 [Service]
 Type=simple
-Environment=PATH=%h/.cargo/bin:%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=%h/.margatroid/bin:%h/.cargo/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStartPre=-%h/.margatroid/install.sh
-ExecStart=%h/bin/margatroid-daemon
+ExecStart=%h/.margatroid/bin/margatroid-daemon
 Restart=always
 RestartSec=10
 

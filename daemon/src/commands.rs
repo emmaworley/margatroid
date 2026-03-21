@@ -132,7 +132,7 @@ fn cmd_start(name: &str, image: &str) -> String {
 
     // Launch in a new tmux window
     let home = margatroid::home_dir();
-    let tui_bin = home.join("bin/margatroid-tui");
+    let tui_bin = home.join(".margatroid/bin/margatroid-tui");
     let tui_path = tui_bin.to_string_lossy().into_owned();
 
     match margatroid::tmux::new_window(name, &[&tui_path, name, image]) {

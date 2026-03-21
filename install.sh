@@ -12,7 +12,7 @@ set -euo pipefail
 
 REPO_URL="https://github.com/emmaworley/margatroid.git"
 INSTALL_DIR="${MARGATROID_DIR:-$HOME/.margatroid}"
-BIN_DIR="$HOME/bin"
+BIN_DIR="$INSTALL_DIR/bin"
 SYSTEMD_DIR="$HOME/.config/systemd/user"
 BINARIES=(margatroid-boot margatroid-daemon margatroid-tui margatroid-cleanup)
 
