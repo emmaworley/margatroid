@@ -188,7 +188,7 @@ pub fn launch(name: &str, image_input: &str, inject_resume: bool) -> Result<()> 
     eprintln!();
 
     // Fork remote-control helper
-    remote_control::fork_helper(name, &session_dir, inject_resume || should_inject)?;
+    remote_control::fork_helper(name, inject_resume || should_inject)?;
     tracing::debug!(name, "remote-control helper forked");
 
     if image_input == "host" {
