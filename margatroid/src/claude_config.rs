@@ -34,11 +34,21 @@ pub fn ensure_trusted(session_dir: &Path) -> Result<()> {
 
     let dir_str = session_dir.to_string_lossy().to_string();
     let obj = data.as_object_mut().ok_or(ConfigError::NotAnObject)?;
+
+    let mut changed = false;
+
+    // Skip the /remote-control confirmation dialog
+    if !obj.get("remoteDialogSeen").and_then(|v| v.as_bool()).unwrap_or(false) {
+        obj.insert("remoteDialogSeen".into(), serde_json::Value::Bool(true));
+        changed = true;
+    }
+
+    // Ensure the session directory is trusted
     let projects = obj
         .entry("projects")
         .or_insert_with(|| serde_json::json!({}));
 
-    let needs_update = match projects.get(&dir_str) {
+    let needs_trust = match projects.get(&dir_str) {
         Some(proj) => !proj
             .get("hasTrustDialogAccepted")
             .and_then(|v| v.as_bool())
@@ -46,7 +56,7 @@ pub fn ensure_trusted(session_dir: &Path) -> Result<()> {
         None => true,
     };
 
-    if needs_update {
+    if needs_trust {
         projects[&dir_str] = serde_json::json!({
             "hasTrustDialogAccepted": true,
             "allowedTools": [],
@@ -55,8 +65,11 @@ pub fn ensure_trusted(session_dir: &Path) -> Result<()> {
             "enabledMcpjsonServers": [],
             "disabledMcpjsonServers": [],
         });
+        changed = true;
+    }
+
+    if changed {
         let content = serde_json::to_string_pretty(&data)?;
-        // Atomic write via tmp+rename to avoid corrupting shared config on crash
         let tmp = path.with_extension("json.tmp");
         fs::write(&tmp, &content)?;
         fs::rename(&tmp, &path)?;
