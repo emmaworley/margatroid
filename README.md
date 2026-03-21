@@ -18,23 +18,23 @@ Manages containerized Claude Code sessions via tmux, Podman, and the Anthropic B
      │                         │
      │ tmux                    │ tmux new-window
      ▼                         ▼
-┌──────────────────────────────────────────────┐
-│              tmux session "claude"           │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐      │
-│  │ _Session │ │ session1 │ │ session2 │ ...  │
-│  │ Manager  │ │ (podman) │ │ (podman) │      │
-│  │  (TUI)   │ │          │ │          │      │
-│  └──────────┘ └────┬─────┘ └────┬─────┘      │
-│                    │            │            │
-│              pane-died hook → cleanup        │
-└──────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│            tmux session "margatroid"             │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐          │
+│  │ _Session │ │ session1 │ │ session2 │ ...      │
+│  │ Manager  │ │ (podman) │ │ (podman) │          │
+│  │  (TUI)   │ │          │ │          │          │
+│  └──────────┘ └────┬─────┘ └────┬─────┘          │
+│                    │            │                │
+│              pane-died hook → cleanup            │
+└──────────────────────────────────────────────────┘
 ```
 
 ## Workspace Crates
 
 | Crate | Type | Purpose |
 |-------|------|---------|
-| **orchestrator** | lib | Core session, container, and tmux management |
+| **margatroid** | lib | Core session, container, and tmux management |
 | **bridge** | lib | HTTP/SSE client for the Anthropic Bridge API |
 | **boot** | bin | Systemd service: creates tmux session, restores saved sessions |
 | **daemon** | bin | Systemd service: bridge API worker for remote control via claude.ai/code |
@@ -44,7 +44,7 @@ Manages containerized Claude Code sessions via tmux, Podman, and the Anthropic B
 ### Dependency Graph
 
 ```
-orchestrator (lib)          bridge (lib)
+margatroid (lib)            bridge (lib)
      │                           │
      ├── boot                    │
      ├── tui                     │
@@ -71,9 +71,9 @@ This clones the repo to `~/.margatroid`, builds from source, installs binaries t
 ### What gets installed
 
 ```
-~/bin/orchestrator-{boot,daemon,tui,cleanup}     # Binaries
-~/.config/systemd/user/claude-tmux.service        # Session manager service
-~/.config/systemd/user/claude-daemon.service      # Bridge daemon service
+~/bin/margatroid-{boot,daemon,tui,cleanup}          # Binaries
+~/.config/systemd/user/margatroid-tmux.service       # Session manager service
+~/.config/systemd/user/margatroid-daemon.service     # Bridge daemon service
 ~/.config/systemd/user/margatroid-update.{service,timer}  # Auto-update
 ```
 
@@ -98,19 +98,19 @@ cargo build --release
 ```
 
 Binaries are produced in `target/release/`:
-- `orchestrator-boot`
-- `orchestrator-daemon`
-- `orchestrator-tui`
-- `orchestrator-cleanup`
+- `margatroid-boot`
+- `margatroid-daemon`
+- `margatroid-tui`
+- `margatroid-cleanup`
 
 ## Session Lifecycle
 
-1. **Boot** creates the shared tmux session and restores any previously saved sessions from `~/.config/claude-sessions/sessions.json`.
+1. **Boot** creates the shared tmux session and restores any previously saved sessions from `~/.config/margatroid/sessions.json`.
 
 2. **Sessions are created** via the TUI (`/start <name> [image]`) or the remote control web UI. Each session gets:
    - A working directory at `~/sessions/<name>/`
    - A Podman container running the specified image
-   - A tmux window within the shared `claude` session
+   - A tmux window within the shared `margatroid` session
    - Claude Code running inside the container with `/remote-control` mode
 
 3. **The daemon** registers as a bridge environment with the Anthropic API, creates a "Session Manager" session visible at claude.ai/code, and responds to slash commands (`/list`, `/start`, `/stop`, etc.) from the web UI.
@@ -146,7 +146,7 @@ The daemon exposes these commands via the claude.ai/code web interface:
 ### Persistent State
 
 ```
-~/.config/claude-sessions/
+~/.config/margatroid/
   sessions.json                # Active sessions (name → image)
   image-mru.json               # Most recently used images
 ```
@@ -170,13 +170,13 @@ The daemon implements the Anthropic Bridge protocol for remote control. See `bri
 
 ## Systemd Services
 
-### claude-tmux.service
+### margatroid-tmux.service
 
 Creates the shared tmux session and restores saved sessions. Runs as a user service.
 
-### claude-daemon.service
+### margatroid-daemon.service
 
-Polls the bridge API for work and manages remote control sessions. Depends on `claude-tmux.service`. Checks for updates on start. Automatically restarts on failure.
+Polls the bridge API for work and manages remote control sessions. Depends on `margatroid-tmux.service`. Checks for updates on start. Automatically restarts on failure.
 
 ### margatroid-update.timer
 
@@ -187,17 +187,17 @@ Checks for updates hourly. On new commits: pulls, rebuilds, and restarts the dae
 Run with debug logging:
 
 ```sh
-RUST_LOG=debug cargo run --bin orchestrator-daemon
+RUST_LOG=debug cargo run --bin margatroid-daemon
 ```
 
 Run the TUI interactively:
 
 ```sh
-cargo run --bin orchestrator-tui
+cargo run --bin margatroid-tui
 ```
 
 Launch a session directly (bypasses TUI):
 
 ```sh
-cargo run --bin orchestrator-tui -- <session-name> <image>
+cargo run --bin margatroid-tui -- <session-name> <image>
 ```

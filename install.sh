@@ -14,7 +14,7 @@ REPO_URL="https://github.com/emmaworley/margatroid.git"
 INSTALL_DIR="${MARGATROID_DIR:-$HOME/.margatroid}"
 BIN_DIR="$HOME/bin"
 SYSTEMD_DIR="$HOME/.config/systemd/user"
-BINARIES=(orchestrator-boot orchestrator-daemon orchestrator-tui orchestrator-cleanup)
+BINARIES=(margatroid-boot margatroid-daemon margatroid-tui margatroid-cleanup)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -113,8 +113,8 @@ systemctl --user daemon-reload
 # Enable and start services (idempotent)
 # ---------------------------------------------------------------------------
 
-systemctl --user enable --now claude-tmux.service 2>/dev/null || true
-systemctl --user enable --now claude-daemon.service 2>/dev/null || true
+systemctl --user enable --now margatroid-tmux.service 2>/dev/null || true
+systemctl --user enable --now margatroid-daemon.service 2>/dev/null || true
 systemctl --user enable --now margatroid-update.timer 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
@@ -123,7 +123,7 @@ systemctl --user enable --now margatroid-update.timer 2>/dev/null || true
 # ---------------------------------------------------------------------------
 
 if [ "$MODE" = update ]; then
-    systemctl --user restart claude-daemon.service 2>/dev/null || true
+    systemctl --user restart margatroid-daemon.service 2>/dev/null || true
     info "Daemon restarted with updated binary"
 fi
 
@@ -134,13 +134,13 @@ fi
 if [ "$MODE" = install ]; then
     info "Installation complete!"
     echo
-    echo "  Binaries:  $BIN_DIR/orchestrator-{boot,daemon,tui,cleanup}"
+    echo "  Binaries:  $BIN_DIR/margatroid-{boot,daemon,tui,cleanup}"
     echo "  Source:    $INSTALL_DIR"
-    echo "  Services:  claude-tmux.service, claude-daemon.service"
+    echo "  Services:  margatroid-tmux.service, margatroid-daemon.service"
     echo "  Updates:   margatroid-update.timer (hourly)"
     echo
-    echo "  View status:   systemctl --user status claude-daemon.service"
-    echo "  View logs:     journalctl --user -u claude-daemon.service -f"
+    echo "  View status:   systemctl --user status margatroid-daemon.service"
+    echo "  View logs:     journalctl --user -u margatroid-daemon.service -f"
     echo "  Manual update: $INSTALL_DIR/install.sh"
     echo
 else

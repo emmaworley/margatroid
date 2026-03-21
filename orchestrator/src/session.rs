@@ -211,7 +211,7 @@ pub fn restart(name: &str) -> Result<()> {
     stop(name)?;
 
     // Launch in a new tmux window
-    let tui_bin = home_dir().join("bin/orchestrator-tui");
+    let tui_bin = home_dir().join("bin/margatroid-tui");
     let tui_path = tui_bin.to_string_lossy().into_owned();
     tmux::new_window(name, &[&tui_path, name, &image])?;
 

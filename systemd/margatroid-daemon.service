@@ -1,12 +1,12 @@
 [Unit]
-Description=Claude Remote Control Daemon (Margatroid)
-After=network.target claude-tmux.service
+Description=Margatroid Remote Control Daemon
+After=network.target margatroid-tmux.service
 
 [Service]
 Type=simple
 Environment=PATH=%h/.cargo/bin:%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
 ExecStartPre=-%h/.margatroid/install.sh
-ExecStart=%h/bin/orchestrator-daemon
+ExecStart=%h/bin/margatroid-daemon
 Restart=always
 RestartSec=10
 

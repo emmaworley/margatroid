@@ -3,7 +3,7 @@
 mod app;
 mod views;
 
-use orchestrator::session;
+use margatroid::session;
 
 fn main() {
     tracing_subscriber::fmt()
@@ -16,7 +16,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() >= 2 {
-        // Direct mode: orchestrator-tui <name> [image]
+        // Direct mode: margatroid-tui <name> [image]
         let name = &args[1];
         let image = args.get(2).map(|s| s.as_str()).unwrap_or("ubuntu");
         let inject_resume = args.iter().any(|a| a == "--resume-interrupted");

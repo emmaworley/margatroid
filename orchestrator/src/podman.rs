@@ -33,7 +33,7 @@ pub fn build_run_command(
         "--rm",
         "-it",
         "--init",
-        &format!("--name=claude-{name}"),
+        &format!("--name=margatroid-{name}"),
         &format!("--hostname={hostname}"),
         "--userns=keep-id:uid=1001,gid=1001",
         "--user=1001:1001",
@@ -82,7 +82,7 @@ pub fn build_run_command(
 /// Force-remove a stale container with the given session name.
 pub fn remove_stale(name: &str) -> Result<()> {
     let _output = Command::new("podman")
-        .args(["rm", "-f", &format!("claude-{name}")])
+        .args(["rm", "-f", &format!("margatroid-{name}")])
         .output()?;
     // Ignore errors — container may not exist
     Ok(())
@@ -91,7 +91,7 @@ pub fn remove_stale(name: &str) -> Result<()> {
 /// Stop a container gracefully (5s timeout).
 pub fn stop(name: &str) -> Result<()> {
     let _output = Command::new("podman")
-        .args(["stop", "-t", "5", &format!("claude-{name}")])
+        .args(["stop", "-t", "5", &format!("margatroid-{name}")])
         .output()?;
     Ok(())
 }
@@ -99,7 +99,7 @@ pub fn stop(name: &str) -> Result<()> {
 /// Force-remove a container.
 pub fn rm(name: &str) -> Result<()> {
     let _output = Command::new("podman")
-        .args(["rm", "-f", &format!("claude-{name}")])
+        .args(["rm", "-f", &format!("margatroid-{name}")])
         .output()?;
     Ok(())
 }
@@ -111,7 +111,7 @@ pub fn inspect_id(name: &str) -> Option<String> {
             "inspect",
             "--format",
             "{{.Id}}",
-            &format!("claude-{name}"),
+            &format!("margatroid-{name}"),
         ])
         .output()
         .ok()?;
@@ -138,7 +138,7 @@ mod tests {
         let cmd = build_run_command("test-session", "ubuntu:latest", &session_dir, &[]);
         let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
 
-        assert!(args.contains(&"--name=claude-test-session".to_string()));
+        assert!(args.contains(&"--name=margatroid-test-session".to_string()));
     }
 
     #[test]

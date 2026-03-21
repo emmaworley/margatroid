@@ -2,7 +2,7 @@
 
 use crate::app::{App, RunResult, View};
 use crossterm::event::KeyCode;
-use orchestrator::image::is_valid_session_name;
+use margatroid::image::is_valid_session_name;
 use ratatui::prelude::*;
 use ratatui::widgets::*;
 

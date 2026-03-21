@@ -4,7 +4,7 @@ use crate::views::{confirm, create, detail, session_list};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::execute;
-use orchestrator::session::{self, Session};
+use margatroid::session::{self, Session};
 use ratatui::prelude::*;
 use std::io::stdout;
 
@@ -33,7 +33,7 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         let sessions = session::list_all().unwrap_or_default();
-        let mru_images = orchestrator::image::load_mru();
+        let mru_images = margatroid::image::load_mru();
         Self {
             sessions,
             view: View::SessionList,
@@ -49,7 +49,7 @@ impl App {
 
     pub fn refresh_sessions(&mut self) {
         self.sessions = session::list_all().unwrap_or_default();
-        self.mru_images = orchestrator::image::load_mru();
+        self.mru_images = margatroid::image::load_mru();
     }
 
     /// Get the image items for the create flow.
@@ -129,18 +129,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     execute!(stdout(), LeaveAlternateScreen)?;
                     return Err(format!("Setup failed: {e}").into());
                 }
-                if let Err(e) = orchestrator::state::register(&name, &image) {
+                if let Err(e) = margatroid::state::register(&name, &image) {
                     disable_raw_mode()?;
                     execute!(stdout(), LeaveAlternateScreen)?;
                     return Err(format!("Registration failed: {e}").into());
                 }
-                let _ = orchestrator::image::record_usage(&image);
+                let _ = margatroid::image::record_usage(&image);
 
-                let home = orchestrator::home_dir();
-                let tui_bin = home.join("bin/orchestrator-tui");
+                let home = margatroid::home_dir();
+                let tui_bin = home.join("bin/margatroid-tui");
                 let tui_path = tui_bin.to_string_lossy().into_owned();
 
-                if let Err(e) = orchestrator::tmux::new_window(&name, &[&tui_path, &name, &image]) {
+                if let Err(e) = margatroid::tmux::new_window(&name, &[&tui_path, &name, &image]) {
                     disable_raw_mode()?;
                     execute!(stdout(), LeaveAlternateScreen)?;
                     return Err(format!("Failed to start: {e}").into());

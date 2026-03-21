@@ -1,4 +1,4 @@
-//! Persistent session state in ~/.config/claude-sessions/sessions.json.
+//! Persistent session state in `~/.config/margatroid/sessions.json`.
 //! All mutations are protected by flock.
 
 use crate::home_dir;
@@ -25,11 +25,11 @@ pub enum StateError {
 type Result<T> = std::result::Result<T, StateError>;
 
 fn sessions_file() -> PathBuf {
-    home_dir().join(".config/claude-sessions/sessions.json")
+    home_dir().join(".config/margatroid/sessions.json")
 }
 
 fn lock_file() -> PathBuf {
-    home_dir().join(".config/claude-sessions/sessions.json.lock")
+    home_dir().join(".config/margatroid/sessions.json.lock")
 }
 
 /// Load sessions from disk (no locking).

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 const MAX_MRU: usize = 10;
 
 fn mru_file() -> PathBuf {
-    home_dir().join(".config/claude-sessions/image-mru.json")
+    home_dir().join(".config/margatroid/image-mru.json")
 }
 
 /// Resolve user input to a full image reference.

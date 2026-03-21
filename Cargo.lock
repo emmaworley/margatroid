@@ -809,6 +809,65 @@ dependencies = [
 ]
 
 [[package]]
+name = "margatroid"
+version = "0.1.0"
+dependencies = [
+ "hostname",
+ "libc",
+ "nix 0.29.0",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "margatroid-boot"
+version = "0.1.0"
+dependencies = [
+ "ctrlc",
+ "margatroid",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "margatroid-cleanup"
+version = "0.1.0"
+dependencies = [
+ "margatroid",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "margatroid-daemon"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bridge",
+ "hostname",
+ "margatroid",
+ "reqwest",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "margatroid-tui"
+version = "0.1.0"
+dependencies = [
+ "crossterm",
+ "margatroid",
+ "ratatui",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -954,65 +1013,6 @@ dependencies = [
  "libc",
  "pkg-config",
  "vcpkg",
-]
-
-[[package]]
-name = "orchestrator"
-version = "0.1.0"
-dependencies = [
- "hostname",
- "libc",
- "nix 0.29.0",
- "serde",
- "serde_json",
- "thiserror",
- "tracing",
-]
-
-[[package]]
-name = "orchestrator-boot"
-version = "0.1.0"
-dependencies = [
- "ctrlc",
- "orchestrator",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "orchestrator-cleanup"
-version = "0.1.0"
-dependencies = [
- "orchestrator",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "orchestrator-daemon"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bridge",
- "hostname",
- "orchestrator",
- "reqwest",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "orchestrator-tui"
-version = "0.1.0"
-dependencies = [
- "crossterm",
- "orchestrator",
- "ratatui",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

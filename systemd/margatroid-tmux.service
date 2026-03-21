@@ -1,12 +1,12 @@
 [Unit]
-Description=Claude Session Manager (Margatroid)
+Description=Margatroid Session Manager
 After=network.target
 
 [Service]
 Type=simple
 Environment=PATH=%h/.cargo/bin:%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=%h/bin/orchestrator-boot
-ExecStop=/usr/bin/tmux kill-session -t claude
+ExecStart=%h/bin/margatroid-boot
+ExecStop=/usr/bin/tmux kill-session -t margatroid
 Restart=always
 RestartSec=5
 

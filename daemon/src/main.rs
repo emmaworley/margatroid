@@ -40,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
             branch: None,
             git_repo_url: None,
             max_sessions: 1,
-            metadata: Some(serde_json::json!({ "worker_type": "orchestrator-daemon" })),
+            metadata: Some(serde_json::json!({ "worker_type": "margatroid-daemon" })),
             environment_id: None,
         })
         .await?;
@@ -480,14 +480,14 @@ async fn send_welcome(
     hostname: &str,
     session_id: &str,
 ) {
-    let sessions = orchestrator::session::list_all().unwrap_or_default();
+    let sessions = margatroid::session::list_all().unwrap_or_default();
     let running = sessions
         .iter()
-        .filter(|s| s.status == orchestrator::session::SessionStatus::Running)
+        .filter(|s| s.status == margatroid::session::SessionStatus::Running)
         .count();
     let stopped = sessions
         .iter()
-        .filter(|s| s.status == orchestrator::session::SessionStatus::Stopped)
+        .filter(|s| s.status == margatroid::session::SessionStatus::Stopped)
         .count();
 
     let welcome = if sessions.is_empty() {

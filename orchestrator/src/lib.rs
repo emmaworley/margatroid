@@ -17,4 +17,4 @@ pub fn home_dir() -> PathBuf {
 }
 
 /// The shared tmux session name.
-pub const TMUX_SESSION: &str = "claude";
+pub const TMUX_SESSION: &str = "margatroid";

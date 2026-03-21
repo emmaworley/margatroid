@@ -2,15 +2,15 @@
 
 //! Pane-died cleanup handler.
 //!
-//! Called by tmux hook: claude-session-cleanup <window_name> <pane_id>
+//! Called by tmux hook: margatroid-cleanup <window_name> <pane_id>
 //! Stops the container, deregisters the session, and kills the dead pane.
 
-use orchestrator::{podman, state, tmux};
+use margatroid::{podman, state, tmux};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
-        eprintln!("Usage: orchestrator-cleanup <window_name> <pane_id>");
+        eprintln!("Usage: margatroid-cleanup <window_name> <pane_id>");
         std::process::exit(1);
     }
 

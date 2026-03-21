@@ -2,7 +2,7 @@
 
 use crate::app::{App, View};
 use crossterm::event::KeyCode;
-use orchestrator::session::SessionStatus;
+use margatroid::session::SessionStatus;
 use ratatui::prelude::*;
 use ratatui::widgets::*;
 

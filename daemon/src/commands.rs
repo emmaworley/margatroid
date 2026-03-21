@@ -1,8 +1,8 @@
 //! Parse and dispatch text commands from the remote control interface.
 
-use orchestrator::session::{self, SessionStatus};
+use margatroid::session::{self, SessionStatus};
 
-use orchestrator::image::is_valid_session_name;
+use margatroid::image::is_valid_session_name;
 
 /// Handle a text command and return a Markdown-formatted response.
 pub fn handle_command(input: &str) -> String {
@@ -124,18 +124,18 @@ fn cmd_start(name: &str, image: &str) -> String {
         Err(e) => return format!("Setup failed: {e}"),
     }
 
-    if let Err(e) = orchestrator::state::register(name, image) {
+    if let Err(e) = margatroid::state::register(name, image) {
         return format!("Registration failed: {e}");
     }
 
-    let _ = orchestrator::image::record_usage(image);
+    let _ = margatroid::image::record_usage(image);
 
     // Launch in a new tmux window
-    let home = orchestrator::home_dir();
-    let tui_bin = home.join("bin/orchestrator-tui");
+    let home = margatroid::home_dir();
+    let tui_bin = home.join("bin/margatroid-tui");
     let tui_path = tui_bin.to_string_lossy().into_owned();
 
-    match orchestrator::tmux::new_window(name, &[&tui_path, name, image]) {
+    match margatroid::tmux::new_window(name, &[&tui_path, name, image]) {
         Ok(_) => format!("Started session `{name}` with image `{image}`"),
         Err(e) => format!("Failed to start: {e}"),
     }
@@ -203,7 +203,7 @@ fn cmd_info(name: &str) -> String {
 }
 
 fn cmd_images() -> String {
-    let mru = orchestrator::image::load_mru();
+    let mru = margatroid::image::load_mru();
     if mru.is_empty() {
         return "No images in history. Start a session to populate the MRU list.".to_string();
     }

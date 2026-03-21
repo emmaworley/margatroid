@@ -55,7 +55,7 @@ pub fn handle_key(app: &mut App, key: KeyCode) {
                 if let Some(session) = app.sessions.get(idx) {
                     let name = session.name.clone();
                     let remove_data = app.delete_data;
-                    if let Err(e) = orchestrator::session::delete(&name, remove_data) {
+                    if let Err(e) = margatroid::session::delete(&name, remove_data) {
                         app.status_message = Some(format!("Delete failed: {e}"));
                     } else {
                         app.status_message = Some(format!("Deleted {name}"));

@@ -1,14 +1,14 @@
 [package]
-name = "orchestrator-boot"
+name = "margatroid-boot"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "orchestrator-boot"
+name = "margatroid-boot"
 path = "src/main.rs"
 
 [dependencies]
-orchestrator = { path = "../orchestrator" }
+margatroid = { path = "../orchestrator" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ctrlc = "3"

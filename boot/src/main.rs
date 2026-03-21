@@ -1,11 +1,11 @@
 #![deny(warnings)]
 
-//! Systemd entry point for the Claude tmux orchestrator.
+//! Systemd entry point for the Margatroid session manager.
 //!
 //! Creates the shared tmux session, restores saved sessions from
 //! sessions.json, and stays alive polling for tmux session existence.
 
-use orchestrator::{home_dir, state, tmux, TMUX_SESSION};
+use margatroid::{home_dir, state, tmux, TMUX_SESSION};
 use std::thread;
 use std::time::Duration;
 
@@ -51,12 +51,12 @@ fn main() {
         }
     };
 
-    let tui_bin = home_dir().join("bin/orchestrator-tui");
+    let tui_bin = home_dir().join("bin/margatroid-tui");
     let tui_path = tui_bin.to_string_lossy().into_owned();
 
     for (name, info) in &sessions {
         // Validate session name from state file before using in commands
-        if !orchestrator::image::is_valid_session_name(name) {
+        if !margatroid::image::is_valid_session_name(name) {
             tracing::warn!("skipping session with invalid name: {name:?}");
             continue;
         }

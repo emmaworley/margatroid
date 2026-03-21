@@ -2,7 +2,7 @@
 
 use crate::app::{App, RunResult, View};
 use crossterm::event::KeyCode;
-use orchestrator::session::SessionStatus;
+use margatroid::session::SessionStatus;
 use ratatui::prelude::*;
 use ratatui::widgets::*;
 
@@ -126,7 +126,7 @@ pub fn handle_key(app: &mut App, key: KeyCode) -> Option<RunResult> {
             if let Some(session) = app.sessions.get(app.cursor) {
                 if session.status == SessionStatus::Running {
                     let name = session.name.clone();
-                    if let Err(e) = orchestrator::session::stop(&name) {
+                    if let Err(e) = margatroid::session::stop(&name) {
                         app.status_message = Some(format!("Stop failed: {e}"));
                     } else {
                         app.refresh_sessions();
@@ -138,7 +138,7 @@ pub fn handle_key(app: &mut App, key: KeyCode) -> Option<RunResult> {
         KeyCode::Char('r') => {
             if let Some(session) = app.sessions.get(app.cursor) {
                 let name = session.name.clone();
-                if let Err(e) = orchestrator::session::restart(&name) {
+                if let Err(e) = margatroid::session::restart(&name) {
                     app.status_message = Some(format!("Restart failed: {e}"));
                 } else {
                     app.refresh_sessions();
