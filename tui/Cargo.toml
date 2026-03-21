@@ -8,7 +8,7 @@ name = "margatroid-tui"
 path = "src/main.rs"
 
 [dependencies]
-margatroid = { path = "../orchestrator" }
+margatroid = { path = "../margatroid" }
 ratatui = "0.29"
 crossterm = "0.28"
 tracing = "0.1"

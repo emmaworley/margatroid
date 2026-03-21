@@ -9,7 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 bridge = { path = "../bridge" }
-margatroid = { path = "../orchestrator" }
+margatroid = { path = "../margatroid" }
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["json"] }
 serde_json = "1"
