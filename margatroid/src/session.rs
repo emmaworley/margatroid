@@ -161,35 +161,45 @@ pub fn launch(name: &str, image_input: &str, inject_resume: bool) -> Result<()> 
     let user = std::env::var("USER").unwrap_or_else(|_| "unknown".into());
     let session_name = format!("{user}@{hostname}: {name}");
 
-    let mut claude_args = vec!["--name".to_string(), session_name];
+    // For fresh sessions, use `claude remote-control` directly — no helper needed.
+    // For resume sessions, start claude with --resume and fork the helper to send
+    // /remote-control after the session settles.
+    let use_rc_subcommand = matches!(resume_action, discovery::ResumeAction::Fresh) && !inject_resume;
 
-    let should_inject = match &resume_action {
-        discovery::ResumeAction::Fresh => {
-            tracing::info!(name, "starting fresh session");
-            eprintln!("  Starting fresh session...");
-            false
+    let claude_args = if use_rc_subcommand {
+        tracing::info!(name, "starting fresh session (remote-control subcommand)");
+        eprintln!("  Starting fresh session...");
+        vec!["remote-control".to_string(), "--name".to_string(), session_name]
+    } else {
+        let mut args = vec!["--name".to_string(), session_name];
+        match &resume_action {
+            discovery::ResumeAction::Fresh => {
+                tracing::info!(name, "starting fresh session");
+                eprintln!("  Starting fresh session...");
+            }
+            discovery::ResumeAction::ResumeClean(uuid) => {
+                tracing::info!(name, uuid = &uuid[..8.min(uuid.len())], "resuming clean session");
+                eprintln!("  Resuming session {}...", uuid.get(..8).unwrap_or(uuid));
+                args.extend(["--resume".to_string(), uuid.clone()]);
+            }
+            discovery::ResumeAction::ResumeInterrupted(uuid) => {
+                tracing::info!(name, uuid = &uuid[..8.min(uuid.len())], "resuming interrupted session");
+                eprintln!(
+                    "  Resuming interrupted session {}...",
+                    uuid.get(..8).unwrap_or(uuid)
+                );
+                args.extend(["--resume".to_string(), uuid.clone()]);
+            }
         }
-        discovery::ResumeAction::ResumeClean(uuid) => {
-            tracing::info!(name, uuid = &uuid[..8.min(uuid.len())], "resuming clean session");
-            eprintln!("  Resuming session {}...", uuid.get(..8).unwrap_or(uuid));
-            claude_args.extend(["--resume".to_string(), uuid.clone()]);
-            false
-        }
-        discovery::ResumeAction::ResumeInterrupted(uuid) => {
-            tracing::info!(name, uuid = &uuid[..8.min(uuid.len())], "resuming interrupted session");
-            eprintln!(
-                "  Resuming interrupted session {}...",
-                uuid.get(..8).unwrap_or(uuid)
-            );
-            claude_args.extend(["--resume".to_string(), uuid.clone()]);
-            true
-        }
+        args
     };
     eprintln!();
 
-    // Fork remote-control helper
-    remote_control::fork_helper(name, &session_dir, inject_resume || should_inject)?;
-    tracing::debug!(name, "remote-control helper forked");
+    if !use_rc_subcommand {
+        // Fork remote-control helper for resume sessions
+        remote_control::fork_helper(name, &session_dir, inject_resume || matches!(resume_action, discovery::ResumeAction::ResumeInterrupted(_)))?;
+        tracing::debug!(name, "remote-control helper forked");
+    }
 
     if image_input == "host" {
         // Uncontainerized: exec claude directly on the host
