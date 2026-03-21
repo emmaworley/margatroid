@@ -42,9 +42,9 @@ check_cmd() {
     fi
 }
 
-# Run a command, showing only the last N lines of output in dim text while
-# it runs, then clear those lines when done. Falls back to hidden output
-# if not on a terminal.
+# Run a command, showing its latest output line in dim text on a single
+# overwritten line. Clears the status line when done. Falls back to
+# hidden output if not on a terminal.
 run_visible() {
     local label="$1"
     shift
@@ -52,60 +52,30 @@ run_visible() {
     info "$label"
 
     if [ ! -t 1 ]; then
-        # Not a terminal (e.g. piped, systemd) — just run silently
         "$@" >/dev/null 2>&1
         return
     fi
 
-    local tail_lines=5
-    local tmpfile
+    local cols tmpfile line_count
+    cols=$(tput cols 2>/dev/null || echo 80)
     tmpfile=$(mktemp)
+    line_count=0
 
-    # Run command, tee output to tmpfile, show last N lines live
     "$@" 2>&1 | while IFS= read -r line; do
         echo "$line" >> "$tmpfile"
-        # Move up and clear previous tail lines, then print new tail
-        local total
-        total=$(wc -l < "$tmpfile" | tr -d ' ')
-        local show=$tail_lines
-        if [ "$total" -lt "$show" ]; then
-            show=$total
+        local display="${line:0:$((cols - 4))}"
+        # Overwrite previous status line (move up + clear), then print new one
+        if [ "$line_count" -gt 0 ]; then
+            printf '\033[A\033[2K'
         fi
-        # Clear previous output (move up show lines and clear each)
-        if [ "$total" -gt "$show" ]; then
-            local clear_count=$show
-        else
-            local clear_count=$((total - 1))
-        fi
-        if [ "$clear_count" -gt 0 ]; then
-            printf '\033[%dA' "$clear_count"
-            for ((i=0; i<clear_count; i++)); do
-                printf '\033[2K\n'
-            done
-            printf '\033[%dA' "$clear_count"
-        fi
-        tail -n "$show" "$tmpfile" | while IFS= read -r tline; do
-            printf '%s    %s%s\n' "$DIM" "$tline" "$RESET"
-        done
+        printf '%s    %s%s\n' "$DIM" "$display" "$RESET"
+        line_count=$((line_count + 1))
     done
 
-    # Clear the tail lines after command completes
-    local final_lines
-    if [ -f "$tmpfile" ]; then
-        final_lines=$(wc -l < "$tmpfile" | tr -d ' ')
-    else
-        final_lines=0
-    fi
-    local to_clear=$tail_lines
-    if [ "$final_lines" -lt "$to_clear" ]; then
-        to_clear=$final_lines
-    fi
-    if [ "$to_clear" -gt 0 ] && [ -t 1 ]; then
-        printf '\033[%dA' "$to_clear"
-        for ((i=0; i<to_clear; i++)); do
-            printf '\033[2K\n'
-        done
-        printf '\033[%dA' "$to_clear"
+    # Clear the final status line if anything was printed.
+    # The pipe subshell can't tell us, so check the tmpfile.
+    if [ -s "$tmpfile" ]; then
+        printf '\033[A\033[2K'
     fi
     rm -f "$tmpfile"
 }

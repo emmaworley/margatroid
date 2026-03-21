@@ -18,16 +18,21 @@ fn main() {
         .init();
 
     let tmux_conf = home_dir().join(".tmux.conf");
+    let tui_bin = margatroid_dir().join("bin/margatroid-tui");
+    let tui_path = tui_bin.to_string_lossy().into_owned();
 
-    // Create the tmux session if it doesn't exist
+    // Create the tmux session if it doesn't exist.
+    // The initial window runs the TUI so the user sees the session manager
+    // when they attach.
     if !tmux::has_session() {
         let conf_str = tmux_conf.to_string_lossy().into_owned();
+        let tui_cmd = [tui_path.as_str()];
         if tmux_conf.exists() {
-            if let Err(e) = tmux::create_session_with_config("_Session Manager", &conf_str) {
+            if let Err(e) = tmux::create_session_with_config("_Session Manager", &conf_str, &tui_cmd) {
                 tracing::error!("failed to create tmux session: {e}");
                 std::process::exit(1);
             }
-        } else if let Err(e) = tmux::create_session("_Session Manager") {
+        } else if let Err(e) = tmux::create_session("_Session Manager", &tui_cmd) {
             tracing::error!("failed to create tmux session: {e}");
             std::process::exit(1);
         }
@@ -50,9 +55,6 @@ fn main() {
             std::collections::HashMap::new()
         }
     };
-
-    let tui_bin = margatroid_dir().join("bin/margatroid-tui");
-    let tui_path = tui_bin.to_string_lossy().into_owned();
 
     for (name, info) in &sessions {
         // Validate session name from state file before using in commands

@@ -43,15 +43,20 @@ pub fn has_session() -> bool {
     run_ok(&["has-session", "-t", TMUX_SESSION])
 }
 
-/// Create the shared tmux session with an initial window name.
-pub fn create_session(initial_window: &str) -> Result<()> {
-    run(&["new-session", "-d", "-s", TMUX_SESSION, "-n", initial_window])?;
+/// Create the shared tmux session with an initial window running a command.
+pub fn create_session(initial_window: &str, cmd: &[&str]) -> Result<()> {
+    let mut args = vec!["new-session", "-d", "-s", TMUX_SESSION, "-n", initial_window];
+    if !cmd.is_empty() {
+        args.push("--");
+        args.extend(cmd);
+    }
+    run(&args)?;
     Ok(())
 }
 
-/// Create the session with a specific config file.
-pub fn create_session_with_config(initial_window: &str, config: &str) -> Result<()> {
-    run(&[
+/// Create the session with a specific config file, running a command in the initial window.
+pub fn create_session_with_config(initial_window: &str, config: &str, cmd: &[&str]) -> Result<()> {
+    let mut args = vec![
         "-f",
         config,
         "new-session",
@@ -60,7 +65,12 @@ pub fn create_session_with_config(initial_window: &str, config: &str) -> Result<
         TMUX_SESSION,
         "-n",
         initial_window,
-    ])?;
+    ];
+    if !cmd.is_empty() {
+        args.push("--");
+        args.extend(cmd);
+    }
+    run(&args)?;
     Ok(())
 }
 
