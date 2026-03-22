@@ -91,3 +91,9 @@ html, body { height: 100%; background: #0f0f14; color: #c0caf5; font-family: sys
   flex: 1; display: flex; align-items: center; justify-content: center;
   color: #565f89; font-size: 14px;
 }
+
+#update-banner {
+  margin-left: auto; color: #e0af68; font-size: 12px;
+}
+#update-banner a { color: #7aa2f7; text-decoration: none; }
+#update-banner a:hover { text-decoration: underline; }

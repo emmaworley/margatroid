@@ -2,6 +2,28 @@ import { init, Terminal, FitAddon, type ITerminalOptions, type IDisposable } fro
 
 await init();
 
+// Frontend version: fetched from the server on first load. On reconnect,
+// compared against the server's current version to detect updates.
+let loadedVersion: string | null = null;
+(async () => {
+  try {
+    const res = await fetch("/api/version");
+    if (res.ok) {
+      const data = await res.json();
+      loadedVersion = data.version ?? null;
+    }
+  } catch { /* server may not be up yet */ }
+})();
+// Expose for tests.
+declare global {
+  interface Window {
+    __BUILD_VERSION__: string | null;
+    term: Terminal | null;
+    ws: WebSocket | null;
+  }
+}
+Object.defineProperty(window, "__BUILD_VERSION__", { get: () => loadedVersion });
+
 interface SessionInfo {
   name: string;
   image: string;
@@ -188,6 +210,7 @@ function connect(sessionId: string): void {
   pausedChunks = [];
   const thisGeneration = ++connectGeneration;
 
+  cancelReconnect();
   if (ws) {
     ws.onmessage = null;
     ws.onclose = null;
@@ -252,11 +275,13 @@ function connect(sessionId: string): void {
     `${proto}//${location.host}/ws/${encodeURIComponent(sessionId)}?cols=${term.cols || 80}&rows=${term.rows || 24}`
   );
   ws.binaryType = "arraybuffer";
+  window.ws = ws;
 
   setStatus("connected", "connecting...");
 
   ws.onopen = () => {
     if (thisGeneration !== connectGeneration) return;
+    reconnectAttempt = 0;
     setStatus("connected", "connected");
     const cols = term!.cols || 80;
     const rows = term!.rows || 24;
@@ -294,14 +319,71 @@ function connect(sessionId: string): void {
   });
 
   ws.onclose = () => {
-    setStatus("disconnected", "disconnected");
     ws = null;
+    // Only auto-reconnect if this is still the active connection
+    // (not superseded by a user-initiated session switch).
+    if (thisGeneration === connectGeneration && currentSession === sessionId) {
+      scheduleReconnect(sessionId);
+    } else {
+      setStatus("disconnected", "disconnected");
+    }
   };
   ws.onerror = () => {
-    setStatus("disconnected", "error");
+    // onclose fires after onerror, so reconnect is handled there.
   };
 
   refreshSessions();
+}
+
+// --- Auto-reconnect ---
+
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectAttempt = 0;
+
+function scheduleReconnect(sessionId: string): void {
+  reconnectAttempt++;
+  const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempt - 1), 10000);
+  setStatus("disconnected", `reconnecting... (${reconnectAttempt})`);
+
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (currentSession !== sessionId) return; // Switched away
+    connect(sessionId);
+    checkVersion();
+  }, delay);
+}
+
+function cancelReconnect(): void {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  reconnectAttempt = 0;
+}
+
+async function checkVersion(): Promise<void> {
+  try {
+    const res = await fetch("/api/version");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.version && loadedVersion && data.version !== loadedVersion) {
+      showUpdateBanner();
+    }
+  } catch {
+    // Server unreachable — will retry on next reconnect.
+  }
+}
+
+function showUpdateBanner(): void {
+  if (document.getElementById("update-banner")) return;
+  const banner = document.createElement("span");
+  banner.id = "update-banner";
+  banner.innerHTML = `Update available · <a href="#" id="update-reload">reload</a>`;
+  document.getElementById("header")?.appendChild(banner);
+  document.getElementById("update-reload")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    location.reload();
+  });
 }
 
 // --- Init ---

@@ -24,8 +24,16 @@ async fn main() {
     let static_dir = find_static_dir();
     tracing::info!("serving static files from {}", static_dir.display());
 
+    // Compute a version hash from index.html (which references content-hashed
+    // JS/CSS bundles, so any asset change means a different hash).
+    let version = compute_version(&static_dir);
+    tracing::info!("frontend version: {version}");
+
     let app = Router::new()
         .route("/api/sessions", get(list_sessions))
+        .route("/api/version", get(move || async move {
+            Json(serde_json::json!({ "version": version }))
+        }))
         .route("/ws/:session", get(ws_handler))
         .fallback_service(ServeDir::new(&static_dir));
 
@@ -38,6 +46,16 @@ async fn main() {
         .tcp_nodelay(true)
         .await
         .unwrap();
+}
+
+fn compute_version(static_dir: &std::path::Path) -> String {
+    // Read the .version file written by the frontend build (SHA256 of index.html,
+    // which references all content-hashed asset filenames).
+    let version_file = static_dir.join(".version");
+    std::fs::read_to_string(&version_file)
+        .unwrap_or_default()
+        .trim()
+        .to_string()
 }
 
 fn find_static_dir() -> std::path::PathBuf {
