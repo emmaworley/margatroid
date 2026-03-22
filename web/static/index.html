@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Margatroid</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; background: #0f0f14; color: #c0caf5; font-family: system-ui, sans-serif; overscroll-behavior: none; }
+
+    #app { display: flex; height: 100vh; }
+
+    #sidebar {
+      width: 220px; min-width: 220px;
+      background: #16161e; border-right: 1px solid #292e42;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    #sidebar h1 {
+      font-size: 14px; font-weight: 600; padding: 16px 16px 12px;
+      color: #7aa2f7; letter-spacing: 0.5px; text-transform: uppercase;
+    }
+    #session-list {
+      list-style: none; flex: 1; overflow-y: auto; padding: 0 8px;
+    }
+    .section-label {
+      font-size: 11px; color: #565f89; padding: 12px 10px 4px;
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    #session-list li {
+      padding: 8px 10px; margin-bottom: 2px; border-radius: 6px;
+      cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 8px;
+      transition: background 0.15s;
+    }
+    #session-list li:hover { background: #1a1b26; }
+    #session-list li.active { background: #292e42; }
+    #session-list li.disabled { opacity: 0.35; cursor: default; }
+    #session-list li.disabled:hover { background: transparent; }
+
+    .status-dot {
+      width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+    }
+    .status-dot.running { background: #9ece6a; }
+    .status-dot.stopped { background: #565f89; }
+
+    .session-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-image { font-size: 11px; color: #565f89; }
+    .session-badge {
+      font-size: 10px; color: #565f89; background: #1a1b26;
+      padding: 1px 5px; border-radius: 3px;
+    }
+
+    #main {
+      flex: 1; display: flex; flex-direction: column; min-width: 0;
+    }
+    #header {
+      height: 40px; display: flex; align-items: center; padding: 0 16px;
+      background: #16161e; border-bottom: 1px solid #292e42;
+      font-size: 13px; color: #565f89; gap: 8px;
+    }
+    #header .name { color: #c0caf5; font-weight: 500; }
+    #header .connected { color: #9ece6a; }
+    #header .disconnected { color: #f7768e; }
+
+    #terminal-wrap {
+      flex: 1; padding: 4px; overflow: hidden;
+    }
+    #terminal { height: 100%; }
+
+    #placeholder {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      color: #565f89; font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="sidebar">
+      <h1>Margatroid</h1>
+      <ul id="session-list"></ul>
+    </div>
+    <div id="main">
+      <div id="header" style="display:none">
+        <span class="name" id="hdr-name"></span>
+        <span id="hdr-status"></span>
+      </div>
+      <div id="placeholder">Select a session to connect</div>
+      <div id="terminal-wrap" style="display:none">
+        <div id="terminal"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.js"></script>
+  <script>
+    const term = new Terminal({
+      cursorBlink: true,
+      scrollback: 10000,
+      fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, monospace',
+      fontSize: 14,
+      theme: {
+        background: '#0f0f14',
+        foreground: '#c0caf5',
+        cursor: '#c0caf5',
+        selectionBackground: '#33467c',
+        black:   '#15161e', red:     '#f7768e', green:   '#9ece6a', yellow:  '#e0af68',
+        blue:    '#7aa2f7', magenta: '#bb9af7', cyan:    '#7dcfff', white:   '#a9b1d6',
+        brightBlack: '#414868', brightRed: '#f7768e', brightGreen: '#9ece6a',
+        brightYellow: '#e0af68', brightBlue: '#7aa2f7', brightMagenta: '#bb9af7',
+        brightCyan: '#7dcfff', brightWhite: '#c0caf5',
+      },
+    });
+
+    const fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+    term.loadAddon(new WebLinksAddon.WebLinksAddon());
+
+    let ws = null;
+    let currentSession = null;
+    let dataDisposable = null;
+    let resizeDisposable = null;
+
+    // Block horizontal wheel events over the terminal to prevent browser
+    // back/forward navigation. Vertical scroll is handled by tmux (mouse on)
+    // which enters copy-mode / scrollback on wheel-up.
+    document.addEventListener('wheel', (e) => {
+      const wrap = document.getElementById('terminal-wrap');
+      if (!wrap || !wrap.contains(e.target)) return;
+      if (e.deltaX !== 0) e.preventDefault();
+    }, { passive: false });
+
+    // --- Session list ---
+    async function refreshSessions() {
+      try {
+        const res = await fetch('/api/sessions');
+        const sessions = await res.json();
+        renderSessions(sessions);
+      } catch (e) {
+        console.error('Failed to fetch sessions:', e);
+      }
+    }
+
+    function displayName(session) {
+      return session.name === '_manager' ? 'Session Manager' : session.name;
+    }
+
+    function renderSessions(sessions) {
+      const list = document.getElementById('session-list');
+      list.innerHTML = '';
+
+      const manager = sessions.find(s => s.name === '_manager');
+      const others = sessions.filter(s => s.name !== '_manager');
+
+      if (manager) {
+        const li = document.createElement('li');
+        if (currentSession === '_manager') li.classList.add('active');
+        li.innerHTML = `
+          <span class="status-dot running"></span>
+          <span class="session-name">Session Manager</span>
+        `;
+        li.onclick = () => connect('_manager');
+        list.appendChild(li);
+      }
+
+      if (others.length > 0) {
+        const label = document.createElement('div');
+        label.className = 'section-label';
+        label.textContent = 'Sessions';
+        list.appendChild(label);
+
+        for (const s of others) {
+          const li = document.createElement('li');
+          if (!s.connectable) li.classList.add('disabled');
+          if (s.name === currentSession) li.classList.add('active');
+
+          let badge = '';
+          if (s.status !== 'running') badge = '<span class="session-badge">stopped</span>';
+
+          li.innerHTML = `
+            <span class="status-dot ${s.status}"></span>
+            <span class="session-name">${esc(s.name)}</span>
+            ${badge}
+            <span class="session-image">${esc(s.image)}</span>
+          `;
+
+          if (s.connectable) {
+            li.onclick = () => connect(s.name);
+          }
+          list.appendChild(li);
+        }
+      }
+    }
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    // --- Terminal connection ---
+    function connect(sessionId) {
+      if (ws) { ws.close(); ws = null; }
+      if (dataDisposable) { dataDisposable.dispose(); dataDisposable = null; }
+      if (resizeDisposable) { resizeDisposable.dispose(); resizeDisposable = null; }
+      term.reset();
+      currentSession = sessionId;
+
+      // Update URL fragment so refreshing the page reconnects here.
+      history.replaceState(null, '', '#' + encodeURIComponent(sessionId));
+
+      const label = sessionId === '_manager' ? 'Session Manager' : sessionId;
+      document.getElementById('placeholder').style.display = 'none';
+      document.getElementById('terminal-wrap').style.display = '';
+      document.getElementById('header').style.display = '';
+      document.getElementById('hdr-name').textContent = label;
+
+      if (!term.element) {
+        term.open(document.getElementById('terminal'));
+      }
+      fitAddon.fit();
+
+      const { cols, rows } = term;
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${proto}//${location.host}/ws/${encodeURIComponent(sessionId)}?cols=${cols}&rows=${rows}`);
+      ws.binaryType = 'arraybuffer';
+
+      setStatus('connected', 'connecting...');
+
+      ws.onopen = () => {
+        setStatus('connected', 'connected');
+        term.focus();
+      };
+      ws.onmessage = (e) => {
+        if (e.data instanceof ArrayBuffer) {
+          term.write(new Uint8Array(e.data));
+        }
+      };
+      ws.onclose = () => {
+        setStatus('disconnected', 'disconnected');
+        ws = null;
+      };
+      ws.onerror = () => {
+        setStatus('disconnected', 'error');
+      };
+
+      dataDisposable = term.onData((data) => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(new TextEncoder().encode(data));
+        }
+      });
+
+      resizeDisposable = term.onResize(({ cols, rows }) => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+        }
+      });
+
+      refreshSessions();
+    }
+
+    function setStatus(cls, text) {
+      const el = document.getElementById('hdr-status');
+      el.className = cls;
+      el.textContent = text;
+    }
+
+    // --- Init ---
+    refreshSessions().then(() => {
+      // Auto-connect to the session in the URL fragment.
+      const fragment = decodeURIComponent(location.hash.slice(1));
+      if (fragment) {
+        connect(fragment);
+      }
+    });
+    setInterval(refreshSessions, 5000);
+
+    window.addEventListener('resize', () => {
+      if (term.element) fitAddon.fit();
+    });
+  </script>
+</body>
+</html>

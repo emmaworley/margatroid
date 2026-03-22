@@ -20,7 +20,7 @@ INSTALL_DIR="${MARGATROID_DIR:-$HOME/.margatroid}"
 REPO_DIR="$INSTALL_DIR/repo"
 BIN_DIR="$INSTALL_DIR/bin"
 SYSTEMD_DIR="$HOME/.config/systemd/user"
-BINARIES=(margatroid-boot margatroid-daemon margatroid-tui margatroid-cleanup)
+BINARIES=(margatroid-boot margatroid-daemon margatroid-tui margatroid-cleanup margatroid-relay margatroid-web)
 
 # ---------------------------------------------------------------------------
 # Terminal helpers
@@ -154,6 +154,19 @@ fi
 # ---------------------------------------------------------------------------
 
 run_visible "Building" cargo build --release --manifest-path "$REPO_DIR/Cargo.toml"
+
+# Build the web frontend if node/pnpm are available.
+if command -v pnpm >/dev/null 2>&1; then
+    (cd "$REPO_DIR/web/frontend" && pnpm install --frozen-lockfile 2>/dev/null && pnpm build 2>/dev/null) || true
+    if [ -d "$REPO_DIR/web/static/dist" ]; then
+        # Copy WASM file that parcel doesn't bundle.
+        cp "$REPO_DIR/web/frontend/node_modules/ghostty-web/ghostty-vt.wasm" \
+           "$REPO_DIR/web/static/dist/" 2>/dev/null || true
+        # Install static files next to the web binary.
+        mkdir -p "$BIN_DIR/static"
+        cp -r "$REPO_DIR/web/static/dist/"* "$BIN_DIR/static/"
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # Install binaries

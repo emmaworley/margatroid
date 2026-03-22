@@ -1,1 +1,4 @@
 /target
+/web/frontend/node_modules
+/web/frontend/.parcel-cache
+/web/static/dist

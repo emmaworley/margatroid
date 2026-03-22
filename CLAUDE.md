@@ -65,14 +65,40 @@
 - install.sh modifying itself via git pull mid-run — the `main()` wrapper prevents this
 - JWT refresh timer not resetting after refresh — must update both `jwt_obtained_at` and `jwt_expires_in`
 
+### PTY relay (margatroid-relay)
+- Every session launches through `margatroid-relay <name> <command> [args...]`
+- The relay owns the PTY master, forks the session command on the slave
+- Relays stdin/stdout for tmux (transparent — tmux doesn't know it's there)
+- Listens on `~/.margatroid/sessions/<name>/relay.sock` for web clients
+- 64KB ring buffer replays scrollback to newly connecting clients
+- Broadcast fan-out: all web clients see the same output
+- Resize from web clients: `\x00` + 2-byte LE cols + 2-byte LE rows
+- SIGWINCH from tmux is forwarded to the inner PTY
+
+### Web interface (margatroid-web)
+- Serves the ghostty-web frontend on port 8080
+- Sessions connect via Unix socket to the relay — no tmux involvement
+- Manager (`_manager`) spawns a fresh TUI in a PTY (no relay)
+- Frontend: ghostty-web (WASM terminal), pnpm + parcel build
+- FitAddon auto-sizes terminal to browser window
+- URL fragment (`#session-name`) persists and restores session on refresh
+
+### Frontend build
+- Source: `web/frontend/src/` (index.html, main.js, style.css)
+- Build: `cd web/frontend && pnpm install && pnpm build`
+- Output: `web/static/dist/` (served by margatroid-web)
+- Must copy `node_modules/ghostty-web/ghostty-vt.wasm` to `web/static/dist/` after build
+
 ## File layout
 ```
 ~/.margatroid/                    # Everything lives here
   repo/                           # Git clone (source, Cargo.toml, target/)
   bin/                            # Installed binaries
+    static/                       # Web frontend dist (installed by install.sh)
   sessions/<name>/                # Per-session working directories
     .claude.json                  # Per-session config (container mode)
     .claude/                      # Mount target for credentials
+    relay.sock                    # Unix socket for web access (created by relay)
     CLAUDE.md                     # Session instructions
   state/
     sessions.json                 # Active sessions (name → image)

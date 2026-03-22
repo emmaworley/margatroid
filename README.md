@@ -40,6 +40,8 @@ Manages containerized Claude Code sessions via tmux, Podman, and the Anthropic B
 | **daemon** | bin | Systemd service: bridge API worker for remote control via claude.ai/code |
 | **tui** | bin | Terminal UI for browsing and managing sessions |
 | **cleanup** | bin | Tmux pane-died hook handler: stops containers, deregisters sessions |
+| **relay** | bin | PTY interceptor: owns session PTY, exposes Unix socket for web access |
+| **web** | bin | Web server: ghostty-web frontend + WebSocket-to-relay bridge |
 
 ### Dependency Graph
 
@@ -49,7 +51,9 @@ margatroid (lib)            bridge (lib)
      ├── boot                    │
      ├── tui                     │
      ├── cleanup                 │
-     └── daemon ─────────────────┘
+     ├── daemon ─────────────────┘
+     └── web
+relay (standalone)
 ```
 
 ## Prerequisites
