@@ -191,31 +191,46 @@ pub fn launch(name: &str, image_input: &str, inject_resume: bool) -> Result<()> 
     remote_control::fork_helper(name, inject_resume || should_inject)?;
     tracing::debug!(name, "remote-control helper forked");
 
-    if image_input == "host" {
-        // Uncontainerized: exec claude directly on the host
+    // Build the inner command (what the relay will fork/exec).
+    let inner_cmd = if image_input == "host" {
         let claude_bin = podman::find_claude_bin();
-        tracing::info!(name, bin = %claude_bin.display(), "exec claude (host mode)");
+        tracing::info!(name, bin = %claude_bin.display(), "host mode");
         let mut cmd = std::process::Command::new(claude_bin);
         cmd.args(&claude_args);
         cmd.current_dir(&session_dir);
-        let err = exec_command(&mut cmd);
-        return Err(SessionError::Other(format!("exec failed: {err}")));
+        cmd
+    } else {
+        podman::remove_stale(name)?;
+        let cmd = podman::build_run_command(name, &resolved_image, &session_dir, &claude_args);
+        tracing::info!(
+            name,
+            image = %resolved_image,
+            program = ?cmd.get_program(),
+            args = ?cmd.get_args().collect::<Vec<_>>(),
+            "container mode"
+        );
+        cmd
+    };
+
+    // Wrap with the relay binary, which owns the PTY and exposes a Unix socket.
+    let relay_bin = find_relay_binary();
+    let mut relay_cmd = std::process::Command::new(&relay_bin);
+    relay_cmd.arg(name);
+    relay_cmd.arg(inner_cmd.get_program());
+    relay_cmd.args(inner_cmd.get_args());
+    // Inherit environment and working directory from the inner command.
+    if let Some(dir) = inner_cmd.get_current_dir() {
+        relay_cmd.current_dir(dir);
     }
+    for (k, v) in inner_cmd.get_envs() {
+        match v {
+            Some(val) => { relay_cmd.env(k, val); }
+            None => { relay_cmd.env_remove(k); }
+        }
+    }
+    tracing::info!(name, relay = %relay_bin.display(), "exec relay");
 
-    // Clean up stale container
-    podman::remove_stale(name)?;
-
-    // Exec into podman (replaces this process)
-    let mut cmd = podman::build_run_command(name, &resolved_image, &session_dir, &claude_args);
-    tracing::info!(
-        name,
-        image = %resolved_image,
-        program = ?cmd.get_program(),
-        args = ?cmd.get_args().collect::<Vec<_>>(),
-        "exec podman"
-    );
-
-    let err = exec_command(&mut cmd);
+    let err = exec_command(&mut relay_cmd);
     Err(SessionError::Other(format!("exec failed: {err}")))
 }
 
@@ -288,6 +303,24 @@ pub fn delete(name: &str, remove_data: bool) -> Result<()> {
 
 /// Exec into a command (does not return on success).
 #[cfg(unix)]
+/// Find the margatroid-relay binary (installed location or co-located with current exe).
+fn find_relay_binary() -> std::path::PathBuf {
+    let installed = crate::margatroid_dir().join("bin/margatroid-relay");
+    if installed.exists() {
+        return installed;
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let dev = dir.join("margatroid-relay");
+            if dev.exists() {
+                return dev;
+            }
+        }
+    }
+    // Fallback: assume it's in PATH.
+    std::path::PathBuf::from("margatroid-relay")
+}
+
 fn exec_command(cmd: &mut std::process::Command) -> std::io::Error {
     use std::os::unix::process::CommandExt;
     cmd.exec()

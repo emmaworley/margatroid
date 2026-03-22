@@ -21,7 +21,7 @@ fn projects_dir() -> PathBuf {
 }
 
 fn slugify_path(path: &Path) -> String {
-    path.to_string_lossy().replace('/', "-")
+    path.to_string_lossy().replace(['/', '.'], "-")
 }
 
 /// Find the most recent session UUID for the given session directory.
@@ -227,6 +227,11 @@ mod tests {
         assert_eq!(
             slugify(Path::new("/home/claude/sessions/test")),
             "-home-claude-sessions-test"
+        );
+        // Dots are replaced with dashes, matching Claude Code's slugification.
+        assert_eq!(
+            slugify(Path::new("/home/margatroid/.margatroid/sessions/dev")),
+            "-home-margatroid--margatroid-sessions-dev"
         );
     }
 
