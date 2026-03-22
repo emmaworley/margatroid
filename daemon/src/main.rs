@@ -495,7 +495,7 @@ async fn send_welcome(
         format!(
             "## {hostname} Session Manager\n\n\
              No sessions found. Get started:\n\n\
-             - `/start <name> [image]` — create a new session (default image: ubuntu)\n\
+             - `/start <name> <--image=IMAGE|--host>` — create a new session\n\
              - `/help` — see all commands"
         )
     } else {
@@ -503,7 +503,7 @@ async fn send_welcome(
             "## {hostname} Session Manager\n\n\
              **{running}** running, **{stopped}** stopped ({} total)\n\n\
              - `/list` — show all sessions\n\
-             - `/start <name> [image]` — create a new session\n\
+             - `/start <name> <--image=IMAGE|--host>` — create a new session\n\
              - `/help` — see all commands",
             sessions.len()
         )
