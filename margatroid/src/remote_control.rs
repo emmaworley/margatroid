@@ -65,7 +65,7 @@ fn helper_main(name: &str, inject_resume: bool) {
         let _ = tmux::send_keys(
             &target,
             &[
-                "It looks like your previous work was interrupted. Please review what you were doing and continue from where you left off.",
+                "Your previous session may have been interrupted by a restart. If there is unfinished work, please review and continue from where you left off. If no work was in progress, wait for user input.",
                 "Enter",
             ],
         );
