@@ -56,9 +56,6 @@ pub fn build_run_command(
         .map(|h| h.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "unknown".into());
 
-    let uid = nix::unistd::getuid().as_raw();
-    let gid = nix::unistd::getgid().as_raw();
-
     // Container paths
     let c_home = format!("/home/{name}");
     let c_bin_dir = claude_bin_dir.to_string_lossy();
@@ -66,6 +63,10 @@ pub fn build_run_command(
     // Host credentials path (ro mounted into container)
     let host_creds = home.join(".claude/.credentials.json");
 
+    // Run as root inside the container (podman default for rootless).
+    // Podman's user namespace maps container UID 0 → host UID, so the
+    // container has full root (can apt install, etc.) while files on
+    // host-mounted volumes are owned by the host user.
     let mut cmd = Command::new("podman");
     cmd.args([
         "run",
@@ -75,8 +76,6 @@ pub fn build_run_command(
         "--security-opt", "label=disable",
         &format!("--name=margatroid-{name}"),
         &format!("--hostname={hostname}"),
-        &format!("--userns=keep-id:uid={uid},gid={gid}"),
-        &format!("--user={uid}:{gid}"),
     ]);
 
     // Mounts:
@@ -230,12 +229,12 @@ mod tests {
     }
 
     #[test]
-    fn uses_current_uid() {
+    fn runs_as_root_inside_container() {
         let args = test_cmd("test", "ubuntu", "/tmp/s", &[]);
-        let uid = nix::unistd::getuid().as_raw();
-        let gid = nix::unistd::getgid().as_raw();
-        assert!(args.contains(&format!("--userns=keep-id:uid={uid},gid={gid}")));
-        assert!(args.contains(&format!("--user={uid}:{gid}")));
+        // Should NOT have keep-id or --user flags — container runs as root
+        // (podman rootless maps container root to host user via userns).
+        assert!(!args.iter().any(|a| a.contains("--userns")));
+        assert!(!args.iter().any(|a| a.starts_with("--user=")));
     }
 
     #[test]
