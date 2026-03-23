@@ -120,3 +120,16 @@
     sessions.json                 # Active sessions (name → image)
     sessions.json.lock            # flock file (O_CLOEXEC)
 ```
+
+<!-- margatroid:start -->
+## Margatroid Session: margatroid-dev
+
+**Host session** — running directly on the host machine with host user permissions.
+
+Working directory: `/home/margatroid/.margatroid/sessions/margatroid-dev`
+All files here persist across session restarts.
+
+This session is managed by margatroid. It may be stopped and restarted
+automatically (e.g. during updates). In-memory state (running processes,
+environment variables) is not preserved across restarts.
+<!-- margatroid:end -->

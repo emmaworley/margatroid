@@ -153,15 +153,17 @@ pub fn launch(name: &str, image_input: &str, inject_resume: bool) -> Result<()> 
         let _ = tmux::rename_window(name, name);
     }
 
-    // Determine resume action. For container sessions, Claude Code sees
-    // /home/<name> as its working directory (not the host session_dir path),
-    // so the JSONL project slug is based on the container path.
-    let discovery_dir = if image_input == "host" {
-        session_dir.clone()
+    // Determine resume action. For container sessions:
+    // - The JSONL slug is based on the container path (/home/<name>)
+    // - The JSONL files live in the session dir's .claude/projects/ (mounted rw)
+    //   not in the host's ~/.claude/projects/
+    let resume_action = if image_input == "host" {
+        discovery::determine_resume_action(&session_dir)
     } else {
-        std::path::PathBuf::from(format!("/home/{name}"))
+        let container_path = std::path::PathBuf::from(format!("/home/{name}"));
+        let projects_root = session_dir.join(".claude/projects");
+        discovery::determine_resume_action_in(&container_path, &projects_root)
     };
-    let resume_action = discovery::determine_resume_action(&discovery_dir);
     let hostname = hostname::get()
         .map(|h| h.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "unknown".into());
@@ -356,6 +358,19 @@ pub fn rename(old_name: &str, new_name: &str) -> Result<()> {
     let container_home = format!("/home/{new_name}");
     let host_mode = image == "host";
     let _ = claude_config::setup_session(&new_dir, new_name, &container_home, host_mode, &image);
+
+    // For container sessions, rename the JSONL project directory so resume
+    // detection finds the old session under the new name's slug.
+    if !host_mode {
+        let projects_dir = new_dir.join(".claude/projects");
+        let old_slug = discovery::slugify(std::path::Path::new(&format!("/home/{old_name}")));
+        let new_slug = discovery::slugify(std::path::Path::new(&format!("/home/{new_name}")));
+        let old_project_dir = projects_dir.join(&old_slug);
+        let new_project_dir = projects_dir.join(&new_slug);
+        if old_project_dir.is_dir() && !new_project_dir.exists() {
+            let _ = fs::rename(&old_project_dir, &new_project_dir);
+        }
+    }
 
     Ok(())
 }

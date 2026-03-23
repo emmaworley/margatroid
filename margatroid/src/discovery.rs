@@ -16,7 +16,7 @@ pub enum ResumeAction {
     ResumeInterrupted(String),
 }
 
-fn projects_dir() -> PathBuf {
+fn default_projects_dir() -> PathBuf {
     home_dir().join(".claude/projects")
 }
 
@@ -25,9 +25,14 @@ fn slugify_path(path: &Path) -> String {
 }
 
 /// Find the most recent session UUID for the given session directory.
+/// `projects_root` overrides where to look for project JSONL files.
 pub fn find_last_uuid(session_dir: &Path) -> Option<String> {
+    find_last_uuid_in(session_dir, &default_projects_dir())
+}
+
+fn find_last_uuid_in(session_dir: &Path, projects_root: &Path) -> Option<String> {
     let slug = slugify_path(session_dir);
-    let project_dir = projects_dir().join(&slug);
+    let project_dir = projects_root.join(&slug);
 
     if !project_dir.is_dir() {
         return None;
@@ -53,12 +58,18 @@ pub fn find_last_uuid(session_dir: &Path) -> Option<String> {
 
 /// Determine the resume action for a session directory.
 pub fn determine_resume_action(session_dir: &Path) -> ResumeAction {
-    let uuid = match find_last_uuid(session_dir) {
+    determine_resume_action_in(session_dir, &default_projects_dir())
+}
+
+/// Like `determine_resume_action` but looks for JSONL files in a custom
+/// projects root instead of the default `~/.claude/projects/`.
+pub fn determine_resume_action_in(session_dir: &Path, projects_root: &Path) -> ResumeAction {
+    let uuid = match find_last_uuid_in(session_dir, projects_root) {
         Some(u) => u,
         None => return ResumeAction::Fresh,
     };
 
-    if was_session_idle(session_dir, &uuid) {
+    if was_session_idle(session_dir, &uuid, projects_root) {
         ResumeAction::ResumeClean(uuid)
     } else {
         ResumeAction::ResumeInterrupted(uuid)
@@ -67,9 +78,9 @@ pub fn determine_resume_action(session_dir: &Path) -> ResumeAction {
 
 /// Check if the session was idle (waiting for input) or cleanly exited.
 /// Reads the tail of the JSONL file to determine the final state.
-fn was_session_idle(session_dir: &Path, uuid: &str) -> bool {
+fn was_session_idle(session_dir: &Path, uuid: &str, projects_root: &Path) -> bool {
     let slug = slugify_path(session_dir);
-    let jsonl_path = projects_dir().join(&slug).join(format!("{uuid}.jsonl"));
+    let jsonl_path = projects_root.join(&slug).join(format!("{uuid}.jsonl"));
 
     match read_tail(&jsonl_path, 4096) {
         Some(tail) => is_tail_idle(&tail),
@@ -233,6 +244,84 @@ mod tests {
             slugify(Path::new("/home/margatroid/.margatroid/sessions/dev")),
             "-home-margatroid--margatroid-sessions-dev"
         );
+    }
+
+    #[test]
+    fn determine_resume_with_custom_projects_root() {
+        let dir = std::env::temp_dir().join(format!("orch-test-resume-{}", std::process::id()));
+        let projects_root = dir.join("projects");
+        let container_path = Path::new("/home/testbox");
+        let slug = slugify(container_path); // "-home-testbox"
+        let project_dir = projects_root.join(&slug);
+        std::fs::create_dir_all(&project_dir).unwrap();
+
+        // No JSONL files → Fresh
+        let action = determine_resume_action_in(container_path, &projects_root);
+        assert!(matches!(action, ResumeAction::Fresh));
+
+        // Write a JSONL with a success result → ResumeClean
+        let uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        let jsonl = project_dir.join(format!("{uuid}.jsonl"));
+        std::fs::write(
+            &jsonl,
+            r#"{"type":"result","subtype":"success","result":"done"}"#,
+        )
+        .unwrap();
+
+        let action = determine_resume_action_in(container_path, &projects_root);
+        match action {
+            ResumeAction::ResumeClean(u) => assert_eq!(u, uuid),
+            other => panic!("expected ResumeClean, got {other:?}"),
+        }
+
+        // Write interrupted content → ResumeInterrupted
+        std::fs::write(
+            &jsonl,
+            r#"{"type":"user","message":{"content":"fix bug"}}
+{"type":"assistant","message":{"content":"working on it"}}"#,
+        )
+        .unwrap();
+
+        let action = determine_resume_action_in(container_path, &projects_root);
+        match action {
+            ResumeAction::ResumeInterrupted(u) => assert_eq!(u, uuid),
+            other => panic!("expected ResumeInterrupted, got {other:?}"),
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn container_session_uses_session_dir_projects() {
+        // Simulate the container session layout:
+        // session_dir/.claude/projects/-home-mybox/<uuid>.jsonl
+        let dir = std::env::temp_dir().join(format!("orch-test-container-{}", std::process::id()));
+        let session_dir = dir.join("sessions/mybox");
+        let container_path = Path::new("/home/mybox");
+        let slug = slugify(container_path); // "-home-mybox"
+        let projects_in_session = session_dir.join(".claude/projects").join(&slug);
+        std::fs::create_dir_all(&projects_in_session).unwrap();
+
+        let uuid = "11111111-2222-3333-4444-555555555555";
+        std::fs::write(
+            projects_in_session.join(format!("{uuid}.jsonl")),
+            r#"{"type":"result","subtype":"success","result":"ok"}"#,
+        )
+        .unwrap();
+
+        // Looking in default projects dir (host) should find nothing
+        let action = determine_resume_action(container_path);
+        assert!(matches!(action, ResumeAction::Fresh));
+
+        // Looking in session dir's projects root should find it
+        let projects_root = session_dir.join(".claude/projects");
+        let action = determine_resume_action_in(container_path, &projects_root);
+        match action {
+            ResumeAction::ResumeClean(u) => assert_eq!(u, uuid),
+            other => panic!("expected ResumeClean, got {other:?}"),
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
