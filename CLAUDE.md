@@ -84,7 +84,7 @@
 - URL fragment (`#session-name`) persists and restores session on refresh
 
 ### Frontend build
-- Source: `web/frontend/src/` (index.html, main.js, style.css)
+- Source: `web/frontend/src/` (index.html, main.ts, style.css)
 - Build: `cd web/frontend && pnpm install && pnpm build`
 - Output: `web/static/dist/` (served by margatroid-web)
 - Must copy `node_modules/ghostty-web/ghostty-vt.wasm` to `web/static/dist/` after build

@@ -75,7 +75,8 @@ This clones the repo to `~/.margatroid`, builds from source, and enables systemd
 ### What gets installed
 
 ```
-~/.margatroid/bin/margatroid-{boot,daemon,tui,cleanup}    # Binaries
+~/.margatroid/bin/margatroid-{boot,daemon,tui,cleanup,relay,web}  # Binaries
+~/.margatroid/bin/static/                                        # Web frontend
 ~/.config/systemd/user/margatroid-tmux.service             # Session manager service
 ~/.config/systemd/user/margatroid-daemon.service           # Bridge daemon service
 ~/.config/systemd/user/margatroid-update.{service,timer}   # Auto-update
@@ -114,6 +115,8 @@ Binaries are produced in `target/release/`:
 - `margatroid-daemon`
 - `margatroid-tui`
 - `margatroid-cleanup`
+- `margatroid-relay`
+- `margatroid-web`
 
 ## Session Lifecycle
 
