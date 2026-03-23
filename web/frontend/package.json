@@ -6,11 +6,13 @@
   "scripts": {
     "dev": "parcel serve src/index.html",
     "build": "parcel build src/index.html --dist-dir ../static/dist --public-url ./ && sha256sum ../static/dist/index.html | cut -c1-12 > ../static/dist/.version",
-    "test": "playwright test"
+    "test": "playwright test",
+    "lint": "biome check src/"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
     "@types/node": "^25.5.0",
+    "@biomejs/biome": "^1",
     "parcel": "^2",
     "typescript": "^5.9.3"
   },

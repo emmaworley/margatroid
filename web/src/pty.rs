@@ -70,7 +70,7 @@ impl PtyMaster {
 /// A child process connected to a PTY.
 pub struct PtyProcess {
     master: PtyMaster,
-    _pid: nix::unistd::Pid,
+    pid: nix::unistd::Pid,
 }
 
 impl PtyProcess {
@@ -91,6 +91,13 @@ impl PtyProcess {
             libc::ioctl(master_raw, libc::TIOCSWINSZ, &ws);
         }
 
+        // Prepare CStrings before fork to avoid allocating in the child.
+        let c_program = CString::new(program).unwrap();
+        let c_args: Vec<CString> = std::iter::once(program)
+            .chain(args.iter().copied())
+            .map(|s| CString::new(s).unwrap())
+            .collect();
+
         match unsafe { fork() }.map_err(nix_to_io)? {
             ForkResult::Parent { child } => {
                 // Close slave in parent
@@ -107,7 +114,7 @@ impl PtyProcess {
                     master: PtyMaster {
                         fd: Arc::new(async_fd),
                     },
-                    _pid: child,
+                    pid: child,
                 })
             }
             ForkResult::Child => {
@@ -121,14 +128,20 @@ impl PtyProcess {
                     unsafe { libc::close(slave_raw); }
                 }
 
-                // Ensure tmux sees a capable terminal
-                std::env::set_var("TERM", "xterm-256color");
+                // Close inherited FDs to avoid leaking lock files etc.
+                for fd in 3..1024 {
+                    unsafe { libc::close(fd); }
+                }
 
-                let c_program = CString::new(program).unwrap();
-                let c_args: Vec<CString> = std::iter::once(program)
-                    .chain(args.iter().copied())
-                    .map(|s| CString::new(s).unwrap())
-                    .collect();
+                // Ensure tmux sees a capable terminal
+                unsafe {
+                    libc::setenv(
+                        c"TERM".as_ptr(),
+                        c"xterm-256color".as_ptr(),
+                        1,
+                    );
+                }
+
                 let _ = execvp(&c_program, &c_args);
                 unsafe { libc::_exit(1); }
             }
@@ -137,6 +150,13 @@ impl PtyProcess {
 
     pub fn master(&self) -> PtyMaster {
         self.master.clone()
+    }
+}
+
+impl Drop for PtyProcess {
+    fn drop(&mut self) {
+        let _ = nix::sys::signal::kill(self.pid, nix::sys::signal::Signal::SIGTERM);
+        let _ = nix::sys::wait::waitpid(self.pid, Some(nix::sys::wait::WaitPidFlag::WNOHANG));
     }
 }
 

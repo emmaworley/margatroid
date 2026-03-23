@@ -301,8 +301,6 @@ pub fn delete(name: &str, remove_data: bool) -> Result<()> {
     Ok(())
 }
 
-/// Exec into a command (does not return on success).
-#[cfg(unix)]
 /// Find the margatroid-relay binary (installed location or co-located with current exe).
 fn find_relay_binary() -> std::path::PathBuf {
     let installed = crate::margatroid_dir().join("bin/margatroid-relay");
@@ -321,6 +319,8 @@ fn find_relay_binary() -> std::path::PathBuf {
     std::path::PathBuf::from("margatroid-relay")
 }
 
+/// Exec into a command (does not return on success).
+#[cfg(unix)]
 fn exec_command(cmd: &mut std::process::Command) -> std::io::Error {
     use std::os::unix::process::CommandExt;
     cmd.exec()

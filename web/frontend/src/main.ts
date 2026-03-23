@@ -57,11 +57,6 @@ let resizeDisposable: IDisposable | null = null;
 let revealTimer: ReturnType<typeof setTimeout> | null = null;
 let connectGeneration = 0;
 
-// Expose for tests.
-declare global {
-  interface Window { term: Terminal | null; }
-}
-
 // --- Helpers ---
 
 function $(id: string): HTMLElement {
@@ -147,6 +142,7 @@ $("expand-btn").onclick = () => {
 async function refreshSessions(): Promise<void> {
   try {
     const res = await fetch("/api/sessions");
+    if (!res.ok) return;
     const sessions: SessionInfo[] = await res.json();
     renderSessions(sessions);
   } catch (e) {
@@ -187,8 +183,9 @@ function renderSessions(sessions: SessionInfo[]): void {
       if (s.status !== "running")
         badge = '<span class="session-badge">stopped</span>';
 
+      const safeStatus = ["running", "stopped"].includes(s.status) ? s.status : "stopped";
       li.innerHTML = `
-        <span class="status-dot ${s.status}"></span>
+        <span class="status-dot ${safeStatus}"></span>
         <span class="session-name">${esc(s.name)}</span>
         ${badge}
         <span class="session-image">${esc(s.image)}</span>
@@ -208,6 +205,7 @@ function connect(sessionId: string): void {
   if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
   outputPaused = false;
   pausedChunks = [];
+  scrollAccum = 0;
   const thisGeneration = ++connectGeneration;
 
   cancelReconnect();
@@ -328,7 +326,8 @@ function connect(sessionId: string): void {
       setStatus("disconnected", "disconnected");
     }
   };
-  ws.onerror = () => {
+  ws.onerror = (e) => {
+    console.error("WebSocket error:", e);
     // onclose fires after onerror, so reconnect is handled there.
   };
 

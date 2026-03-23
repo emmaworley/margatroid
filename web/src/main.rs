@@ -37,7 +37,7 @@ async fn main() {
         .route("/ws/:session", get(ws_handler))
         .fallback_service(ServeDir::new(&static_dir));
 
-    let addr = "0.0.0.0:8080";
+    let addr = "127.0.0.1:8080";
     tracing::info!("listening on {addr}");
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     // Disable Nagle's algorithm on accepted connections so single-keystroke
@@ -128,6 +128,10 @@ async fn ws_handler(
     Path(session): Path<String>,
     Query(params): Query<WsParams>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    if session.contains('/') || session.contains("..") || session.contains('\0') {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     let cols = params.cols.unwrap_or(80);
     let rows = params.rows.unwrap_or(24);
 
@@ -212,7 +216,11 @@ async fn handle_manager(socket: WebSocket, tui: String, cols: u16, rows: u16) {
                             if let (Some(c), Some(r)) =
                                 (cmd["cols"].as_u64(), cmd["rows"].as_u64())
                             {
-                                write_master.resize(c as u16, r as u16);
+                                let c = c as u16;
+                                let r = r as u16;
+                                if c > 0 && c <= 500 && r > 0 && r <= 200 {
+                                    write_master.resize(c, r);
+                                }
                             }
                         }
                     }
@@ -295,11 +303,15 @@ async fn handle_relay(
                             if let (Some(c), Some(r)) =
                                 (cmd["cols"].as_u64(), cmd["rows"].as_u64())
                             {
-                                let mut msg = vec![0u8];
-                                msg.extend_from_slice(&(c as u16).to_le_bytes());
-                                msg.extend_from_slice(&(r as u16).to_le_bytes());
-                                if sock_writer.write_all(&msg).await.is_err() {
-                                    break;
+                                let c = c as u16;
+                                let r = r as u16;
+                                if c > 0 && c <= 500 && r > 0 && r <= 200 {
+                                    let mut msg = vec![0u8];
+                                    msg.extend_from_slice(&c.to_le_bytes());
+                                    msg.extend_from_slice(&r.to_le_bytes());
+                                    if sock_writer.write_all(&msg).await.is_err() {
+                                        break;
+                                    }
                                 }
                             }
                         }

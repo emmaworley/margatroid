@@ -4,7 +4,7 @@
 //!
 //! The relay:
 //! 1. Creates a PTY pair and forks the command on the slave side
-//! 2. Relays stdin/stdout ↔ PTY master (so tmux sees a normal terminal)
+//! 2. Relays stdin/stdout <-> PTY master (so tmux sees a normal terminal)
 //! 3. Listens on a Unix socket for web clients (fan-out output, merge input)
 //! 4. Maintains a ring buffer for scrollback replay on client connect
 
@@ -24,6 +24,8 @@ const RING_BUFFER_SIZE: usize = 64 * 1024;
 const MAX_CLIENTS: usize = 8;
 
 fn main() {
+    tracing_subscriber::fmt::init();
+
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
         eprintln!("usage: margatroid-relay <session-name> <command> [args...]");
@@ -33,6 +35,12 @@ fn main() {
     let session_name = &args[1];
     let command = &args[2];
     let command_args = &args[2..];
+
+    // Validate session name.
+    if session_name.contains('/') || session_name.contains("..") || session_name.contains('\0') {
+        eprintln!("invalid session name");
+        std::process::exit(1);
+    }
 
     // Compute socket path.
     let margatroid_dir = std::env::var("MARGATROID_DIR")
@@ -57,6 +65,13 @@ fn main() {
     // Inherit terminal size from stdin (tmux's PTY).
     inherit_winsize(libc::STDIN_FILENO, master_raw);
 
+    // Pre-compute CString values before fork to avoid post-fork UB.
+    let c_cmd = CString::new(command.as_str()).unwrap();
+    let c_args: Vec<CString> = command_args
+        .iter()
+        .map(|s| CString::new(s.as_str()).unwrap())
+        .collect();
+
     // Fork the child process.
     let child_pid = match unsafe { fork() }.expect("fork failed") {
         ForkResult::Child => {
@@ -73,13 +88,10 @@ fn main() {
             for fd in 3..1024 {
                 unsafe { libc::close(fd) };
             }
-            std::env::set_var("TERM", "xterm-256color");
+            unsafe {
+                libc::setenv(c"TERM".as_ptr(), c"xterm-256color".as_ptr(), 1);
+            }
 
-            let c_cmd = CString::new(command.as_str()).unwrap();
-            let c_args: Vec<CString> = command_args
-                .iter()
-                .map(|s| CString::new(s.as_str()).unwrap())
-                .collect();
             let _ = execvp(&c_cmd, &c_args);
             unsafe { libc::_exit(127) };
         }
@@ -217,12 +229,23 @@ async fn event_loop(master_fd: RawFd, child_pid: Pid, sock_path: PathBuf) -> i32
 
     // Unix socket listener for web clients.
     let listener = UnixListener::bind(&sock_path).expect("failed to bind relay socket");
+
+    // chmod socket to 0600.
+    unsafe {
+        libc::chmod(
+            std::ffi::CString::new(sock_path.to_string_lossy().as_bytes())
+                .unwrap()
+                .as_ptr(),
+            0o600,
+        );
+    }
+
     tracing::info!("relay socket at {}", sock_path.display());
 
     // Track the master fd for resize operations from clients.
     let master_raw_fd = master.raw_fd();
 
-    // --- Task: read PTY master → write stdout + broadcast to clients ---
+    // --- Task: read PTY master -> write stdout + broadcast to clients ---
     let pty_reader_master = master.clone();
     let pty_reader_tx = tx.clone();
     let pty_reader_ring = ring.clone();
@@ -240,12 +263,12 @@ async fn event_loop(master_fd: RawFd, child_pid: Pid, sock_path: PathBuf) -> i32
                     // Append to ring buffer.
                     {
                         let mut ring = pty_reader_ring.lock().await;
-                        for &b in &chunk {
-                            if ring.len() >= RING_BUFFER_SIZE {
-                                ring.pop_front();
-                            }
-                            ring.push_back(b);
+                        let overflow =
+                            (ring.len() + chunk.len()).saturating_sub(RING_BUFFER_SIZE);
+                        if overflow > 0 {
+                            ring.drain(..overflow);
                         }
+                        ring.extend(chunk.iter());
                     }
                     // Broadcast to web clients.
                     let _ = pty_reader_tx.send(chunk);
@@ -261,7 +284,7 @@ async fn event_loop(master_fd: RawFd, child_pid: Pid, sock_path: PathBuf) -> i32
         }
     });
 
-    // --- Task: read stdin (tmux) → write PTY master ---
+    // --- Task: read stdin (tmux) -> write PTY master ---
     let stdin_writer_master = master.clone();
     let stdin_writer = tokio::spawn(async move {
         let mut stdin = tokio::io::stdin();
@@ -287,13 +310,13 @@ async fn event_loop(master_fd: RawFd, child_pid: Pid, sock_path: PathBuf) -> i32
                 Err(_) => break,
             };
 
-            let count = client_count.load(std::sync::atomic::Ordering::Relaxed);
-            if count >= MAX_CLIENTS {
+            let prev = client_count.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            if prev >= MAX_CLIENTS {
+                client_count.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
                 tracing::warn!("max clients reached, dropping connection");
                 drop(stream);
                 continue;
             }
-            client_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
             let client_master = master.clone();
             let client_ring = ring.clone();
@@ -302,12 +325,12 @@ async fn event_loop(master_fd: RawFd, child_pid: Pid, sock_path: PathBuf) -> i32
 
             tokio::spawn(async move {
                 handle_client(stream, client_master, client_ring, client_rx, master_raw_fd).await;
-                client_count.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                client_count.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
             });
         }
     });
 
-    // --- Task: SIGWINCH from tmux → resize PTY ---
+    // --- Task: SIGWINCH from tmux -> resize PTY ---
     let sigwinch_task = tokio::spawn(async move {
         let mut sig =
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::window_change())
@@ -316,6 +339,15 @@ async fn event_loop(master_fd: RawFd, child_pid: Pid, sock_path: PathBuf) -> i32
             // tmux resized its pane; propagate to the inner PTY.
             inherit_winsize(libc::STDIN_FILENO, master_raw_fd);
         }
+    });
+
+    // --- Task: SIGTERM handler -> kill child and exit ---
+    let sigterm_child_pid = child_pid;
+    let sigterm_task = tokio::spawn(async move {
+        let mut sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("SIGTERM handler failed");
+        sig.recv().await;
+        let _ = nix::sys::signal::kill(sigterm_child_pid, nix::sys::signal::Signal::SIGTERM);
     });
 
     // --- Task: wait for child exit ---
@@ -327,8 +359,20 @@ async fn event_loop(master_fd: RawFd, child_pid: Pid, sock_path: PathBuf) -> i32
         }
     });
 
-    // Wait for child to exit, then clean up.
-    let exit_code = child_task.await.unwrap_or(1);
+    // Wait for child to exit or SIGTERM, then clean up.
+    let exit_code = tokio::select! {
+        code = child_task => {
+            code.unwrap_or(1)
+        }
+        _ = sigterm_task => {
+            // SIGTERM received, child was killed; wait for it briefly.
+            match waitpid(child_pid, Some(nix::sys::wait::WaitPidFlag::WNOHANG)) {
+                Ok(WaitStatus::Exited(_, code)) => code,
+                Ok(WaitStatus::Signaled(_, sig, _)) => 128 + sig as i32,
+                _ => 143, // 128 + SIGTERM(15)
+            }
+        }
+    };
     tracing::info!("child exited with code {exit_code}");
 
     // Clean up.
@@ -344,9 +388,9 @@ async fn event_loop(master_fd: RawFd, child_pid: Pid, sock_path: PathBuf) -> i32
 /// Handle a single web client connected via Unix socket.
 ///
 /// Protocol:
-/// - Raw bytes from client → written to PTY master (terminal input)
-/// - Raw bytes from PTY → sent to client (terminal output, via broadcast)
-/// - Control: \x00 + 2-byte LE cols + 2-byte LE rows → resize PTY
+/// - Raw bytes from client -> written to PTY master (terminal input)
+/// - Raw bytes from PTY -> sent to client (terminal output, via broadcast)
+/// - Control: \x00 + 2-byte LE cols + 2-byte LE rows -> resize PTY
 async fn handle_client(
     stream: UnixStream,
     master: Arc<AsyncRawFd>,
@@ -368,8 +412,8 @@ async fn handle_client(
         }
     }
 
-    // Broadcast → client (output).
-    let write_task = tokio::spawn(async move {
+    // Broadcast -> client (output).
+    let mut write_task = tokio::spawn(async move {
         loop {
             match rx.recv().await {
                 Ok(data) => {
@@ -385,8 +429,8 @@ async fn handle_client(
         }
     });
 
-    // Client → PTY master (input + resize control).
-    let read_task = tokio::spawn(async move {
+    // Client -> PTY master (input + resize control).
+    let mut read_task = tokio::spawn(async move {
         let mut buf = [0u8; 4096];
         loop {
             match reader.read(&mut buf).await {
@@ -408,7 +452,7 @@ async fn handle_client(
     });
 
     tokio::select! {
-        _ = write_task => {}
-        _ = read_task => {}
+        _ = &mut write_task => { read_task.abort(); }
+        _ = &mut read_task => { write_task.abort(); }
     }
 }
