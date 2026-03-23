@@ -128,7 +128,11 @@ async fn ws_handler(
     Path(session): Path<String>,
     Query(params): Query<WsParams>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    if session.contains('/') || session.contains("..") || session.contains('\0') {
+    if session.is_empty()
+        || session.contains('/')
+        || session.contains("..")
+        || session.contains('\0')
+    {
         return Err(StatusCode::BAD_REQUEST);
     }
 

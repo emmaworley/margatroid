@@ -156,7 +156,22 @@ impl PtyProcess {
 impl Drop for PtyProcess {
     fn drop(&mut self) {
         let _ = nix::sys::signal::kill(self.pid, nix::sys::signal::Signal::SIGTERM);
-        let _ = nix::sys::wait::waitpid(self.pid, Some(nix::sys::wait::WaitPidFlag::WNOHANG));
+        // Brief blocking wait to reap the child and avoid zombies.
+        // Try non-blocking first; if still alive, sleep briefly and retry.
+        for _ in 0..10 {
+            match nix::sys::wait::waitpid(
+                self.pid,
+                Some(nix::sys::wait::WaitPidFlag::WNOHANG),
+            ) {
+                Ok(nix::sys::wait::WaitStatus::StillAlive) => {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                _ => return,
+            }
+        }
+        // Final attempt — if still alive after 500ms, SIGKILL.
+        let _ = nix::sys::signal::kill(self.pid, nix::sys::signal::Signal::SIGKILL);
+        let _ = nix::sys::wait::waitpid(self.pid, None);
     }
 }
 

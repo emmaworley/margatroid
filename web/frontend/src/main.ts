@@ -2,6 +2,8 @@ import { init, Terminal, FitAddon, type ITerminalOptions, type IDisposable } fro
 
 await init();
 
+const textEncoder = new TextEncoder();
+
 // Frontend version: fetched from the server on first load. On reconnect,
 // compared against the server's current version to detect updates.
 let loadedVersion: string | null = null;
@@ -150,7 +152,14 @@ async function refreshSessions(): Promise<void> {
   }
 }
 
+let lastSessionsJson = "";
+
 function renderSessions(sessions: SessionInfo[]): void {
+  // Skip DOM rebuild if data and active session haven't changed.
+  const json = JSON.stringify(sessions) + "|" + (currentSession ?? "");
+  if (json === lastSessionsJson) return;
+  lastSessionsJson = json;
+
   const list = $("session-list");
   list.innerHTML = "";
 
@@ -285,6 +294,7 @@ function connect(sessionId: string): void {
     const rows = term!.rows || 24;
     ws!.send(JSON.stringify({ type: "resize", cols, rows }));
     revealTimer = setTimeout(reveal, 350);
+    checkVersion();
   };
 
   ws.onmessage = (e: MessageEvent) => {
@@ -306,7 +316,7 @@ function connect(sessionId: string): void {
 
   dataDisposable = term.onData((data: string) => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(new TextEncoder().encode(data));
+      ws.send(textEncoder.encode(data));
     }
   });
 
@@ -348,7 +358,6 @@ function scheduleReconnect(sessionId: string): void {
     reconnectTimer = null;
     if (currentSession !== sessionId) return; // Switched away
     connect(sessionId);
-    checkVersion();
   }, delay);
 }
 

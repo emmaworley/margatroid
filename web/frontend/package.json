@@ -5,7 +5,7 @@
   "source": "src/index.html",
   "scripts": {
     "dev": "parcel serve src/index.html",
-    "build": "parcel build src/index.html --dist-dir ../static/dist --public-url ./ && sha256sum ../static/dist/index.html | cut -c1-12 > ../static/dist/.version",
+    "build": "parcel build src/index.html --dist-dir ../static/dist --public-url ./ && node -e \"const c=require('crypto'),f=require('fs');process.stdout.write(c.createHash('sha256').update(f.readFileSync('../static/dist/index.html')).digest('hex').slice(0,12))\" > ../static/dist/.version",
     "test": "playwright test",
     "lint": "biome check src/"
   },
