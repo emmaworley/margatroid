@@ -153,8 +153,15 @@ pub fn launch(name: &str, image_input: &str, inject_resume: bool) -> Result<()> 
         let _ = tmux::rename_window(name, name);
     }
 
-    // Determine resume action
-    let resume_action = discovery::determine_resume_action(&session_dir);
+    // Determine resume action. For container sessions, Claude Code sees
+    // /home/<name> as its working directory (not the host session_dir path),
+    // so the JSONL project slug is based on the container path.
+    let discovery_dir = if image_input == "host" {
+        session_dir.clone()
+    } else {
+        std::path::PathBuf::from(format!("/home/{name}"))
+    };
+    let resume_action = discovery::determine_resume_action(&discovery_dir);
     let hostname = hostname::get()
         .map(|h| h.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "unknown".into());
