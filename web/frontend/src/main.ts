@@ -35,18 +35,20 @@ interface SessionInfo {
 
 const TERM_OPTIONS: ITerminalOptions = {
   scrollback: 10000,
-  fontSize: 14,
-  fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, monospace',
+  fontSize: 12,
+  fontFamily: 'Monaco, Consolas, "JetBrains Mono", "Fira Code", Menlo, monospace',
   theme: {
-    background: "#0f0f14",
-    foreground: "#c0caf5",
-    cursor: "#c0caf5",
-    selectionBackground: "#33467c",
-    black: "#15161e", red: "#f7768e", green: "#9ece6a", yellow: "#e0af68",
-    blue: "#7aa2f7", magenta: "#bb9af7", cyan: "#7dcfff", white: "#a9b1d6",
-    brightBlack: "#414868", brightRed: "#f7768e", brightGreen: "#9ece6a",
-    brightYellow: "#e0af68", brightBlue: "#7aa2f7", brightMagenta: "#bb9af7",
-    brightCyan: "#7dcfff", brightWhite: "#c0caf5",
+    background: "#000000",
+    foreground: "#bbbbbb",
+    cursor: "#bbbbbb",
+    cursorAccent: "#ffffff",
+    selectionBackground: "#b4d5ff",
+    selectionForeground: "#000000",
+    black: "#000000", red: "#bb0000", green: "#00bb00", yellow: "#bbbb00",
+    blue: "#0000bb", magenta: "#bb00bb", cyan: "#00bbbb", white: "#bbbbbb",
+    brightBlack: "#555555", brightRed: "#ff5555", brightGreen: "#55ff55",
+    brightYellow: "#ffff55", brightBlue: "#5555ff", brightMagenta: "#ff55ff",
+    brightCyan: "#55ffff", brightWhite: "#ffffff",
   },
 };
 
@@ -121,11 +123,50 @@ document.addEventListener("wheel", (e: WheelEvent) => {
   }
 }, { passive: false, capture: true });
 
-document.addEventListener("keydown", () => {
+// Capture-phase keydown: pass browser shortcuts through (Cmd+T, Cmd+1-9,
+// etc.) while keeping terminal control keys. Also handle Shift+Enter
+// for Claude Code multiline input (sends CSI 13;2u).
+document.addEventListener("keydown", (e: KeyboardEvent) => {
+  // Shift+Enter → send CSI u encoding for Kitty keyboard protocol.
+  // Claude Code uses this to distinguish multiline input from submit.
+  if (e.key === "Enter" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      ws.send(textEncoder.encode("\x1b[13;2u"));
+      return;
+    }
+  }
+  if (e.metaKey || (e.ctrlKey && !e.altKey)) {
+    const key = e.key.toLowerCase();
+    const terminalKeys = new Set([
+      "c", "v", "a", "z", "d", "l", "o", "r", "p", "n", "k", "u", "w", "e",
+      "b", "f", "g", "h", "j", "t", "x", "y",  // emacs/nano/shell bindings
+    ]);
+    if (!terminalKeys.has(key)) {
+      // Let the browser handle it (new tab, tab switch, etc.).
+      e.stopImmediatePropagation();
+      return;
+    }
+  }
+
   if (outputPaused) resumeOutput();
   if (term?.element && document.activeElement !== (term as any).textarea) {
     term.focus();
   }
+}, { capture: true });
+
+// Paste: intercept paste events and send content through bracketed paste
+// mode so Claude Code sees it as a paste (showing "[Pasted text ...]")
+// rather than as typed input.
+document.addEventListener("paste", (e: ClipboardEvent) => {
+  if (!term?.element || !ws || ws.readyState !== WebSocket.OPEN) return;
+  const text = e.clipboardData?.getData("text");
+  if (!text) return;
+  e.preventDefault();
+  // Bracketed paste: \x1b[200~ ... content ... \x1b[201~
+  const payload = `\x1b[200~${text}\x1b[201~`;
+  ws.send(textEncoder.encode(payload));
 });
 
 // --- Sidebar toggle ---
@@ -402,7 +443,7 @@ function showUpdateBanner(): void {
   if (document.getElementById("update-banner")) return;
   const banner = document.createElement("span");
   banner.id = "update-banner";
-  banner.innerHTML = `Update available · <a href="#" id="update-reload">reload</a>`;
+  banner.innerHTML = `Update available · <a href="javascript:void(0)" id="update-reload">reload</a>`;
   document.getElementById("header")?.appendChild(banner);
   document.getElementById("update-reload")?.addEventListener("click", (e) => {
     e.preventDefault();
@@ -421,8 +462,10 @@ if (fragment) {
 
 setInterval(refreshSessions, 5000);
 
+// Focus terminal on click outside canvas (but not on buttons/sidebar items).
 document.addEventListener("mousedown", (e: MouseEvent) => {
   if (!term?.element) return;
   if ((e.target as HTMLElement).closest("button, li")) return;
   term.focus();
 });
+

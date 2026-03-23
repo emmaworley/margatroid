@@ -57,12 +57,13 @@ test.describe("Auto-reconnect", () => {
       (window as any).ws?.close();
     });
 
-    await page.waitForFunction(
+    // Wait for reconnect — status must reach "connected" at some point.
+    const reconnected = await page.waitForFunction(
       () => document.getElementById("hdr-status")?.textContent === "connected",
       { timeout: 10000 }
-    );
+    ).then(() => true).catch(() => false);
 
-    expect(await getStatus(page)).toBe("connected");
+    expect(reconnected).toBe(true);
   });
 
   test("should not reconnect after user-initiated session switch", async ({ page }) => {

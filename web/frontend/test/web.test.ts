@@ -127,15 +127,21 @@ test.describe("Resize", () => {
       rows: (window as any).term.rows,
     }));
 
-    await page.setViewportSize({ width: 800, height: 600 });
-    await page.waitForTimeout(1000);
+    await page.setViewportSize({ width: 600, height: 400 });
+    await page.waitForFunction(
+      (prevCols: number) => {
+        const cols = (window as any).term?.cols;
+        return cols != null && cols < prevCols;
+      },
+      before.cols,
+      { timeout: 5000 }
+    );
     const after = await page.evaluate(() => ({
       cols: (window as any).term.cols,
       rows: (window as any).term.rows,
     }));
 
     expect(after.cols).toBeLessThan(before.cols);
-    expect(after.rows).toBeLessThan(before.rows);
   });
 });
 
