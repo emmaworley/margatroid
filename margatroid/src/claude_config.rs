@@ -33,7 +33,7 @@ fn host_claude_json_path() -> std::path::PathBuf {
 /// - Creates a per-session .claude.json with trust, remoteDialogSeen, and org UUID
 /// - Creates .claude/ directory inside the session dir (mount target for credentials)
 /// - Writes a default CLAUDE.md if one doesn't exist
-pub fn setup_session(session_dir: &Path, name: &str, container_home: &str, host_mode: bool) -> Result<()> {
+pub fn setup_session(session_dir: &Path, name: &str, container_home: &str, host_mode: bool, image: &str) -> Result<()> {
     fs::create_dir_all(session_dir)?;
 
     let session_dir_str = session_dir.to_string_lossy().to_string();
@@ -55,7 +55,7 @@ pub fn setup_session(session_dir: &Path, name: &str, container_home: &str, host_
     }
 
     // Write CLAUDE.md
-    write_claude_md(session_dir, name)?;
+    write_claude_md(session_dir, name, image, host_mode, container_home)?;
 
     Ok(())
 }
@@ -160,15 +160,56 @@ fn write_session_config(session_dir: &Path, container_home: &str, org_uuid: &str
 }
 
 /// Write a default CLAUDE.md if one doesn't exist.
-fn write_claude_md(session_dir: &Path, name: &str) -> Result<()> {
+fn write_claude_md(
+    session_dir: &Path,
+    name: &str,
+    image: &str,
+    host_mode: bool,
+    container_home: &str,
+) -> Result<()> {
     let claude_md = session_dir.join("CLAUDE.md");
     if !claude_md.exists() {
-        let content = format!(
-            "# Worker Session: {name}\n\n\
-             This is a scoped worker session for the `{name}` project.\n\
-             All file operations should be relative to this directory \
-             unless otherwise specified.\n",
-        );
+        let content = if host_mode {
+            format!(
+                "# Session: {name}\n\n\
+                 ## Environment\n\n\
+                 This is a **host** session — you are running directly on the host machine,\n\
+                 not inside a container. You have the same permissions as the host user.\n\n\
+                 ## Working Directory\n\n\
+                 Your working directory is `{session_dir}`. All files here persist across\n\
+                 session restarts.\n\n\
+                 ## Session Lifecycle\n\n\
+                 This session is managed by margatroid. It may be stopped and restarted\n\
+                 automatically (e.g. during updates). Your working directory and all files\n\
+                 in it are preserved across restarts. In-memory state (running processes,\n\
+                 environment variables) is not preserved.\n",
+                session_dir = session_dir.display(),
+            )
+        } else {
+            format!(
+                "# Session: {name}\n\n\
+                 ## Environment\n\n\
+                 This is a **containerized** session running the `{image}` image.\n\
+                 You have root access inside the container and can install packages\n\
+                 (e.g. `apt install`, `pip install`, `npm install -g`).\n\n\
+                 ## Filesystem\n\n\
+                 | Path | Type | Persists across restarts? |\n\
+                 |------|------|---------------------------|\n\
+                 | `{container_home}/` | rw (mounted from host) | **Yes** — this is your working directory |\n\
+                 | `{container_home}/.claude/` | ro (credentials from host) | N/A (read-only) |\n\
+                 | Everything else (`/usr`, `/tmp`, etc.) | container filesystem | **No** — lost on restart |\n\n\
+                 **Important**: only files under `{container_home}/` survive a session restart.\n\
+                 Packages installed with `apt install` or files written to `/tmp`, `/root`,\n\
+                 `/usr/local`, etc. are lost when the container stops. If you need a tool to\n\
+                 persist, install it into `{container_home}/` (e.g. a Python venv, local npm\n\
+                 prefix, or downloaded binary).\n\n\
+                 ## Session Lifecycle\n\n\
+                 This session is managed by margatroid. It may be stopped and restarted\n\
+                 automatically (e.g. during updates). Your working directory\n\
+                 (`{container_home}/`) is preserved. The container itself is ephemeral\n\
+                 (`--rm`) — each restart starts from a fresh `{image}` image.\n",
+            )
+        };
         fs::write(&claude_md, content)?;
     }
     Ok(())
@@ -184,17 +225,20 @@ mod tests {
             std::env::temp_dir().join(format!("orch-test-claude-md-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
 
-        write_claude_md(&dir, "test-session").unwrap();
+        write_claude_md(&dir, "test-session", "ubuntu", false, "/home/test-session").unwrap();
 
         let path = dir.join("CLAUDE.md");
         assert!(path.exists());
 
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("test-session"));
+        assert!(content.contains("containerized"));
+        assert!(content.contains("ubuntu"));
+        assert!(content.contains("/home/test-session"));
 
         // Second call should not overwrite
         std::fs::write(&path, "custom content").unwrap();
-        write_claude_md(&dir, "test-session").unwrap();
+        write_claude_md(&dir, "test-session", "ubuntu", false, "/home/test-session").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "custom content");
 
         let _ = std::fs::remove_dir_all(&dir);

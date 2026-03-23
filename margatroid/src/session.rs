@@ -130,7 +130,7 @@ pub fn setup(name: &str, image: &str) -> Result<PathBuf> {
     let session_dir = margatroid_dir().join("sessions").join(name);
     let container_home = format!("/home/{name}");
     let host_mode = image == "host";
-    claude_config::setup_session(&session_dir, name, &container_home, host_mode)?;
+    claude_config::setup_session(&session_dir, name, &container_home, host_mode, image)?;
     Ok(session_dir)
 }
 
