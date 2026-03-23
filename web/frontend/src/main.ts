@@ -293,12 +293,28 @@ function connect(sessionId: string): void {
     const cols = term!.cols || 80;
     const rows = term!.rows || 24;
     ws!.send(JSON.stringify({ type: "resize", cols, rows }));
+    // Fallback reveal timer in case the scrollback_end marker never arrives.
     revealTimer = setTimeout(reveal, 350);
     checkVersion();
   };
 
   ws.onmessage = (e: MessageEvent) => {
     if (thisGeneration !== connectGeneration) return;
+
+    // Text frames are control messages from the server.
+    if (typeof e.data === "string") {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === "scrollback_end") {
+          // Scrollback fully buffered. Reveal with a short grace period
+          // for the resize repaint to arrive (sent after scrollback).
+          if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
+          revealTimer = setTimeout(reveal, 50);
+        }
+      } catch { /* ignore malformed JSON */ }
+      return;
+    }
+
     if (e.data instanceof ArrayBuffer) {
       if (pendingData) {
         pendingData.push(new Uint8Array(e.data));

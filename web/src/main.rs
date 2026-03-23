@@ -274,9 +274,43 @@ async fn handle_relay(
 
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
-    // Relay socket → WebSocket
+    // Relay socket → WebSocket (two-phase: scrollback then live)
     let mut relay_to_ws = tokio::spawn(async move {
         let mut buf = [0u8; 4096];
+
+        // Phase 1: Read 4-byte scrollback length prefix from the relay.
+        let mut len_buf = [0u8; 4];
+        if sock_reader.read_exact(&mut len_buf).await.is_err() {
+            return;
+        }
+        let scrollback_len = u32::from_le_bytes(len_buf) as usize;
+
+        // Phase 2: Forward exactly scrollback_len bytes.
+        let mut remaining = scrollback_len;
+        while remaining > 0 {
+            let to_read = remaining.min(buf.len());
+            match sock_reader.read(&mut buf[..to_read]).await {
+                Ok(0) => return,
+                Ok(n) => {
+                    remaining -= n;
+                    if ws_sender.send(Message::Binary(buf[..n].to_vec())).await.is_err() {
+                        return;
+                    }
+                }
+                Err(_) => return,
+            }
+        }
+
+        // Signal the scrollback boundary so the frontend can reveal early.
+        if ws_sender
+            .send(Message::Text(r#"{"type":"scrollback_end"}"#.into()))
+            .await
+            .is_err()
+        {
+            return;
+        }
+
+        // Phase 3: Forward live data.
         loop {
             match sock_reader.read(&mut buf).await {
                 Ok(0) => break,

@@ -400,10 +400,13 @@ async fn handle_client(
 ) {
     let (mut reader, mut writer) = stream.into_split();
 
-    // Replay scrollback buffer.
+    // Replay scrollback buffer with a 4-byte LE length prefix so the
+    // web server knows where scrollback ends and live data begins.
     {
         let ring = ring.lock().await;
         let (a, b) = ring.as_slices();
+        let scrollback_len = (a.len() + b.len()) as u32;
+        let _ = writer.write_all(&scrollback_len.to_le_bytes()).await;
         if !a.is_empty() {
             let _ = writer.write_all(a).await;
         }
