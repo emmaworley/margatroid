@@ -1,6 +1,6 @@
 //! TUI application state machine.
 
-use crate::views::{confirm, create, detail, session_list};
+use crate::views::{confirm, create, detail, rename, session_list};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use margatroid::session::{self, Session};
@@ -16,6 +16,7 @@ pub enum View {
     ConfirmHost,
     Detail(usize),
     ConfirmDelete(usize),
+    Rename(usize),
 }
 
 pub struct App {
@@ -149,6 +150,7 @@ fn draw(app: &App, frame: &mut Frame) {
         View::ConfirmHost => create::draw_confirm_host(app, frame),
         View::Detail(idx) => detail::draw(app, *idx, frame),
         View::ConfirmDelete(idx) => confirm::draw(app, *idx, frame),
+        View::Rename(idx) => rename::draw(app, *idx, frame),
     }
 }
 
@@ -168,6 +170,10 @@ fn handle_key(app: &mut App, key: KeyCode) -> Option<RunResult> {
         }
         View::ConfirmDelete(_) => {
             confirm::handle_key(app, key);
+            None
+        }
+        View::Rename(_) => {
+            rename::handle_key(app, key);
             None
         }
     }

@@ -47,6 +47,15 @@ pub fn handle_command(input: &str) -> String {
                 cmd_delete(parts[1], remove_data)
             }
         }
+        "rename" => {
+            if parts.len() < 3 {
+                "Usage: `/rename <old-name> <new-name>`".to_string()
+            } else if !is_valid_session_name(parts[1]) || !is_valid_session_name(parts[2]) {
+                "Invalid name: use only letters, numbers, hyphens, underscores.".to_string()
+            } else {
+                cmd_rename(parts[1], parts[2])
+            }
+        }
         "info" => {
             if parts.len() < 2 {
                 "Usage: `/info <name>`".to_string()
@@ -223,6 +232,13 @@ fn cmd_info(name: &str) -> String {
     }
 }
 
+fn cmd_rename(old_name: &str, new_name: &str) -> String {
+    match session::rename(old_name, new_name) {
+        Ok(()) => format!("Renamed `{old_name}` → `{new_name}`"),
+        Err(e) => format!("Error: {e}"),
+    }
+}
+
 fn help_text() -> String {
     "## Commands\n\n\
      | Command | Description |\n\
@@ -232,6 +248,7 @@ fn help_text() -> String {
      | `/start <name> --host` | Start an uncontainerized session |\n\
      | `/stop <name>` | Stop a running session |\n\
      | `/restart <name>` | Restart a session |\n\
+     | `/rename <old> <new>` | Rename a stopped session |\n\
      | `/delete <name> [--data]` | Delete a session |\n\
      | `/info <name>` | Show session details |\n\
      | `/help` | Show this help |"

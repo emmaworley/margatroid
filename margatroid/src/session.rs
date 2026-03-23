@@ -308,6 +308,58 @@ pub fn delete(name: &str, remove_data: bool) -> Result<()> {
     Ok(())
 }
 
+/// Rename a session. The session must be stopped first.
+pub fn rename(old_name: &str, new_name: &str) -> Result<()> {
+    // Validate the new name.
+    if !crate::image::is_valid_session_name(new_name) {
+        return Err(SessionError::Other(
+            "Invalid name: use only letters, numbers, hyphens, underscores.".into(),
+        ));
+    }
+
+    // Check the session exists.
+    let sessions = state::load()?;
+    let info = sessions.get(old_name).ok_or_else(|| {
+        SessionError::Other(format!("Session `{old_name}` not found"))
+    })?;
+    let image = info.image.clone();
+
+    // Check the new name isn't taken.
+    if sessions.contains_key(new_name) {
+        return Err(SessionError::Other(
+            format!("Session `{new_name}` already exists"),
+        ));
+    }
+
+    // Check the session is stopped (not running in tmux).
+    let running = tmux::running_window_names();
+    if running.contains(old_name) {
+        return Err(SessionError::Other(
+            format!("Session `{old_name}` is running. Stop it first with `/stop {old_name}`."),
+        ));
+    }
+
+    // Rename the session directory.
+    let sessions_dir = margatroid_dir().join("sessions");
+    let old_dir = sessions_dir.join(old_name);
+    let new_dir = sessions_dir.join(new_name);
+    if old_dir.is_dir() {
+        fs::rename(&old_dir, &new_dir)?;
+    }
+
+    // Update state: deregister old, register new.
+    state::deregister(old_name)?;
+    state::register(new_name, &image)?;
+
+    // Update the margatroid block in CLAUDE.md with the new name.
+    // The upsert will replace the existing block, preserving user content.
+    let container_home = format!("/home/{new_name}");
+    let host_mode = image == "host";
+    let _ = claude_config::setup_session(&new_dir, new_name, &container_home, host_mode, &image);
+
+    Ok(())
+}
+
 /// Find the margatroid-relay binary (installed location or co-located with current exe).
 fn find_relay_binary() -> std::path::PathBuf {
     let installed = crate::margatroid_dir().join("bin/margatroid-relay");

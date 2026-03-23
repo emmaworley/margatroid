@@ -71,7 +71,7 @@ pub fn draw(app: &App, frame: &mut Frame) {
 
     // Help bar
     let help = Paragraph::new(
-        " ↑↓ navigate  Enter resume  n new  s stop  r restart  d delete  i info",
+        " ↑↓ navigate  Enter resume  n new  s stop  r restart  d delete  R rename  i info",
     )
     .style(Style::default().fg(Color::Yellow));
     frame.render_widget(help, chunks[2]);
@@ -154,6 +154,12 @@ pub fn handle_key(app: &mut App, key: KeyCode) -> Option<RunResult> {
         KeyCode::Char('i') => {
             if !app.sessions.is_empty() {
                 app.view = View::Detail(app.cursor);
+            }
+        }
+        KeyCode::Char('R') => {
+            if !app.sessions.is_empty() {
+                app.name_buf.clear();
+                app.view = View::Rename(app.cursor);
             }
         }
         _ => {}

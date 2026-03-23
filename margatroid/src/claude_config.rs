@@ -159,7 +159,15 @@ fn write_session_config(session_dir: &Path, container_home: &str, org_uuid: &str
     Ok(())
 }
 
-/// Write a default CLAUDE.md if one doesn't exist.
+const MARGATROID_BLOCK_START: &str = "<!-- margatroid:start -->";
+const MARGATROID_BLOCK_END: &str = "<!-- margatroid:end -->";
+
+/// Upsert the margatroid-managed block in CLAUDE.md.
+///
+/// If the file doesn't exist, creates it with the block.
+/// If it exists, replaces the existing margatroid block (between the
+/// start/end comment markers) or appends the block if no markers found.
+/// User content outside the markers is preserved.
 fn write_claude_md(
     session_dir: &Path,
     name: &str,
@@ -167,50 +175,64 @@ fn write_claude_md(
     host_mode: bool,
     container_home: &str,
 ) -> Result<()> {
+    let block = if host_mode {
+        format!(
+            "{MARGATROID_BLOCK_START}\n\
+             ## Margatroid Session: {name}\n\n\
+             **Host session** — running directly on the host machine with host user permissions.\n\n\
+             Working directory: `{session_dir}`\n\
+             All files here persist across session restarts.\n\n\
+             This session is managed by margatroid. It may be stopped and restarted\n\
+             automatically (e.g. during updates). In-memory state (running processes,\n\
+             environment variables) is not preserved across restarts.\n\
+             {MARGATROID_BLOCK_END}\n",
+            session_dir = session_dir.display(),
+        )
+    } else {
+        format!(
+            "{MARGATROID_BLOCK_START}\n\
+             ## Margatroid Session: {name}\n\n\
+             **Containerized session** running `{image}`. You have root access and can\n\
+             install packages (`apt install`, `pip install`, `npm install -g`).\n\n\
+             ### Filesystem\n\n\
+             | Path | Type | Persists across restarts? |\n\
+             |------|------|---------------------------|\n\
+             | `{container_home}/` | rw (mounted from host) | **Yes** — working directory |\n\
+             | `{container_home}/.claude/` | ro (credentials) | N/A (read-only) |\n\
+             | Everything else (`/usr`, `/tmp`, etc.) | container fs | **No** — lost on restart |\n\n\
+             Only files under `{container_home}/` survive a restart. Installed packages\n\
+             are lost when the container stops. For persistent tools, install into\n\
+             `{container_home}/` (venv, local npm prefix, downloaded binary).\n\n\
+             The container is ephemeral (`--rm`) — each restart starts from a fresh\n\
+             `{image}` image. This session may be stopped and restarted automatically.\n\
+             {MARGATROID_BLOCK_END}\n",
+        )
+    };
+
     let claude_md = session_dir.join("CLAUDE.md");
-    if !claude_md.exists() {
-        let content = if host_mode {
-            format!(
-                "# Session: {name}\n\n\
-                 ## Environment\n\n\
-                 This is a **host** session — you are running directly on the host machine,\n\
-                 not inside a container. You have the same permissions as the host user.\n\n\
-                 ## Working Directory\n\n\
-                 Your working directory is `{session_dir}`. All files here persist across\n\
-                 session restarts.\n\n\
-                 ## Session Lifecycle\n\n\
-                 This session is managed by margatroid. It may be stopped and restarted\n\
-                 automatically (e.g. during updates). Your working directory and all files\n\
-                 in it are preserved across restarts. In-memory state (running processes,\n\
-                 environment variables) is not preserved.\n",
-                session_dir = session_dir.display(),
-            )
+    if claude_md.exists() {
+        let content = fs::read_to_string(&claude_md)?;
+        if let (Some(start), Some(end)) = (
+            content.find(MARGATROID_BLOCK_START),
+            content.find(MARGATROID_BLOCK_END),
+        ) {
+            // Replace existing block.
+            let before = &content[..start];
+            let after = &content[end + MARGATROID_BLOCK_END.len()..];
+            let new_content = format!("{before}{block}{after}");
+            fs::write(&claude_md, new_content)?;
         } else {
-            format!(
-                "# Session: {name}\n\n\
-                 ## Environment\n\n\
-                 This is a **containerized** session running the `{image}` image.\n\
-                 You have root access inside the container and can install packages\n\
-                 (e.g. `apt install`, `pip install`, `npm install -g`).\n\n\
-                 ## Filesystem\n\n\
-                 | Path | Type | Persists across restarts? |\n\
-                 |------|------|---------------------------|\n\
-                 | `{container_home}/` | rw (mounted from host) | **Yes** — this is your working directory |\n\
-                 | `{container_home}/.claude/` | ro (credentials from host) | N/A (read-only) |\n\
-                 | Everything else (`/usr`, `/tmp`, etc.) | container filesystem | **No** — lost on restart |\n\n\
-                 **Important**: only files under `{container_home}/` survive a session restart.\n\
-                 Packages installed with `apt install` or files written to `/tmp`, `/root`,\n\
-                 `/usr/local`, etc. are lost when the container stops. If you need a tool to\n\
-                 persist, install it into `{container_home}/` (e.g. a Python venv, local npm\n\
-                 prefix, or downloaded binary).\n\n\
-                 ## Session Lifecycle\n\n\
-                 This session is managed by margatroid. It may be stopped and restarted\n\
-                 automatically (e.g. during updates). Your working directory\n\
-                 (`{container_home}/`) is preserved. The container itself is ephemeral\n\
-                 (`--rm`) — each restart starts from a fresh `{image}` image.\n",
-            )
-        };
-        fs::write(&claude_md, content)?;
+            // No existing block — append.
+            let mut content = content;
+            if !content.ends_with('\n') {
+                content.push('\n');
+            }
+            content.push('\n');
+            content.push_str(&block);
+            fs::write(&claude_md, content)?;
+        }
+    } else {
+        fs::write(&claude_md, &block)?;
     }
     Ok(())
 }
@@ -232,14 +254,30 @@ mod tests {
 
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("test-session"));
-        assert!(content.contains("containerized"));
+        assert!(content.contains("Containerized"));
         assert!(content.contains("ubuntu"));
         assert!(content.contains("/home/test-session"));
+        assert!(content.contains(MARGATROID_BLOCK_START));
+        assert!(content.contains(MARGATROID_BLOCK_END));
 
-        // Second call should not overwrite
-        std::fs::write(&path, "custom content").unwrap();
-        write_claude_md(&dir, "test-session", "ubuntu", false, "/home/test-session").unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "custom content");
+        // Second call should upsert the block, not duplicate it
+        write_claude_md(&dir, "renamed-session", "alpine", false, "/home/renamed-session").unwrap();
+        let content2 = std::fs::read_to_string(&path).unwrap();
+        assert!(content2.contains("renamed-session"));
+        assert!(content2.contains("alpine"));
+        assert!(!content2.contains("test-session"));
+        // Should have exactly one block
+        assert_eq!(content2.matches(MARGATROID_BLOCK_START).count(), 1);
+
+        // User content outside the block should be preserved
+        let user_content = "# My Project\n\nCustom instructions here.\n\n";
+        std::fs::write(&path, format!("{user_content}{content2}")).unwrap();
+        write_claude_md(&dir, "updated", "debian", false, "/home/updated").unwrap();
+        let content3 = std::fs::read_to_string(&path).unwrap();
+        assert!(content3.starts_with("# My Project"));
+        assert!(content3.contains("Custom instructions"));
+        assert!(content3.contains("updated"));
+        assert!(content3.contains("debian"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
