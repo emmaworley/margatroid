@@ -4,6 +4,10 @@
 - Always run tests with: `cargo +nightly careful test` (not `cargo test`)
 - Always run `shellcheck` on shell scripts after modifying them
 - Always run `cargo clippy --all-targets` after changes
+- Frontend tests: `cd web/frontend && npx playwright test`
+- Lint frontend: `cd web/frontend && pnpm lint`
+- After building changed binaries, install them: `cp target/debug/<bin> ~/.margatroid/bin/<bin>` (tmp+mv pattern)
+- Existing sessions must be restarted to pick up installed binary changes
 - Ask for review before pushing changes
 
 ## Installer
@@ -56,6 +60,12 @@
 - Config dir: `~/.margatroid/`
 - References to "Claude Code" (the product), `~/.claude/`, `.claude.json`, and the `claude` binary are NOT project names — don't rename those
 
+### Container security model
+- Containers run as root INSIDE (can apt install, pip install, etc.)
+- Podman rootless user namespace maps container UID 0 → host user's UID
+- Files on mounted volumes are owned by the host user despite appearing as root inside
+- This is the standard distrobox/toolbox pattern — container escape only grants host-user privileges
+
 ### Things that have broken before
 - Hardcoded UIDs (1001) in podman — use `getuid()`/`getgid()` instead
 - Hardcoded `/home/claude` paths in container — use actual `home_dir()` or `/home/<name>`
@@ -64,6 +74,12 @@
 - Alternate screen in TUI — don't use it, the TUI is permanent in a detached tmux session
 - install.sh modifying itself via git pull mid-run — the `main()` wrapper prevents this
 - JWT refresh timer not resetting after refresh — must update both `jwt_obtained_at` and `jwt_expires_in`
+- Session name path traversal — validate names (reject `/`, `..`, `\0`, empty) before filesystem ops
+- Post-fork panic UB — prepare CStrings before fork, use libc functions in child, never panic
+- Unix socket injection — chmod relay.sock to 0600 after bind
+- Task leaks in tokio::select! — abort both tasks after select completes
+- Forked children inheriting FDs — close 3..1024 before exec
+- Running services use installed binaries, not build output — always install after building
 
 ### PTY relay (margatroid-relay)
 - Every session launches through `margatroid-relay <name> <command> [args...]`
