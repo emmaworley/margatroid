@@ -359,16 +359,27 @@ pub fn rename(old_name: &str, new_name: &str) -> Result<()> {
     let host_mode = image == "host";
     let _ = claude_config::setup_session(&new_dir, new_name, &container_home, host_mode, &image);
 
-    // For container sessions, rename the JSONL project directory so resume
-    // detection finds the old session under the new name's slug.
-    if !host_mode {
+    // Rename the JSONL project directory so resume detection finds the old
+    // session under the new name's slug.
+    if host_mode {
+        // Host sessions: JSONL in ~/.claude/projects/<slug-of-session-dir>
+        let host_projects = crate::home_dir().join(".claude/projects");
+        let old_slug = discovery::slugify(&old_dir);
+        let new_slug = discovery::slugify(&new_dir);
+        let old_project = host_projects.join(&old_slug);
+        let new_project = host_projects.join(&new_slug);
+        if old_project.is_dir() && !new_project.exists() {
+            let _ = fs::rename(&old_project, &new_project);
+        }
+    } else {
+        // Container sessions: JSONL in session_dir/.claude/projects/<slug-of-container-path>
         let projects_dir = new_dir.join(".claude/projects");
         let old_slug = discovery::slugify(std::path::Path::new(&format!("/home/{old_name}")));
         let new_slug = discovery::slugify(std::path::Path::new(&format!("/home/{new_name}")));
-        let old_project_dir = projects_dir.join(&old_slug);
-        let new_project_dir = projects_dir.join(&new_slug);
-        if old_project_dir.is_dir() && !new_project_dir.exists() {
-            let _ = fs::rename(&old_project_dir, &new_project_dir);
+        let old_project = projects_dir.join(&old_slug);
+        let new_project = projects_dir.join(&new_slug);
+        if old_project.is_dir() && !new_project.exists() {
+            let _ = fs::rename(&old_project, &new_project);
         }
     }
 

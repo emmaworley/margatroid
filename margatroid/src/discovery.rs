@@ -325,6 +325,93 @@ mod tests {
     }
 
     #[test]
+    fn slug_rename_for_container_session() {
+        // When a container session is renamed, the JSONL project dir slug
+        // must be renamed from -home-<old> to -home-<new>.
+        let dir = std::env::temp_dir().join(format!("orch-test-slug-rename-{}", std::process::id()));
+        let session_dir = dir.join("sessions/newname");
+        let projects_dir = session_dir.join(".claude/projects");
+
+        let old_slug = slugify(Path::new("/home/oldname"));
+        let new_slug = slugify(Path::new("/home/newname"));
+        assert_eq!(old_slug, "-home-oldname");
+        assert_eq!(new_slug, "-home-newname");
+
+        // Create old slug dir with a JSONL file
+        let old_project = projects_dir.join(&old_slug);
+        std::fs::create_dir_all(&old_project).unwrap();
+        std::fs::write(
+            old_project.join("test-uuid.jsonl"),
+            r#"{"type":"result","subtype":"success"}"#,
+        ).unwrap();
+
+        // Simulate rename: mv old slug → new slug
+        let new_project = projects_dir.join(&new_slug);
+        std::fs::rename(&old_project, &new_project).unwrap();
+
+        // Discovery should find the JSONL under the new slug
+        let action = determine_resume_action_in(
+            Path::new("/home/newname"),
+            &projects_dir,
+        );
+        match action {
+            ResumeAction::ResumeClean(u) => assert_eq!(u, "test-uuid"),
+            other => panic!("expected ResumeClean, got {other:?}"),
+        }
+
+        // Old slug should no longer exist
+        assert!(!old_project.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn slug_rename_for_host_session() {
+        // When a host session dir is renamed, the slug changes because
+        // the path changes (e.g. sessions/old → sessions/new).
+        let old_path = Path::new("/home/user/.margatroid/sessions/old-project");
+        let new_path = Path::new("/home/user/.margatroid/sessions/new-project");
+
+        let old_slug = slugify(old_path);
+        let new_slug = slugify(new_path);
+
+        // Slugs should differ
+        assert_ne!(old_slug, new_slug);
+        assert!(old_slug.contains("old-project"));
+        assert!(new_slug.contains("new-project"));
+
+        // Simulate: create old slug in a mock projects dir, rename, verify lookup
+        let dir = std::env::temp_dir().join(format!("orch-test-host-slug-{}", std::process::id()));
+        let projects_dir = dir.join("projects");
+        let old_project = projects_dir.join(&old_slug);
+        std::fs::create_dir_all(&old_project).unwrap();
+        std::fs::write(
+            old_project.join("host-uuid.jsonl"),
+            r#"{"type":"result","subtype":"success"}"#,
+        ).unwrap();
+
+        // Before rename: found under old slug
+        let action = determine_resume_action_in(old_path, &projects_dir);
+        assert!(matches!(action, ResumeAction::ResumeClean(_)));
+
+        // Rename slug dir
+        let new_project = projects_dir.join(&new_slug);
+        std::fs::rename(&old_project, &new_project).unwrap();
+
+        // After rename: found under new slug
+        let action = determine_resume_action_in(new_path, &projects_dir);
+        match action {
+            ResumeAction::ResumeClean(u) => assert_eq!(u, "host-uuid"),
+            other => panic!("expected ResumeClean, got {other:?}"),
+        }
+
+        // Old slug gone
+        assert!(!old_project.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn read_tail_small_file() {
         let dir = std::env::temp_dir().join(format!("orch-test-tail-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
