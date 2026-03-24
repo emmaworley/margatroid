@@ -13,6 +13,9 @@ use tracing::{error, info, warn};
 /// How far in advance (in seconds) of JWT expiry to refresh the bridge link.
 const JWT_REFRESH_MARGIN_SECS: u64 = 300; // 5 minutes
 
+/// Refresh the OAuth access token when less than this many ms remain.
+const OAUTH_REFRESH_MARGIN_MS: u64 = 30 * 60 * 1000; // 30 minutes
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -50,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
     let user = std::env::var("USER").unwrap_or_else(|_| "unknown".into());
     let session_name = format!("{user}@{hostname} Session Manager");
     info!(name = %session_name, "creating session");
-    let manager_session_id = {
+    let mut manager_session_id = {
         let c = client.lock().await;
         match c.create_session(&session_name).await {
             Ok(id) => {
@@ -85,14 +88,38 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    let mut last_oauth_check = std::time::Instant::now();
+
     // Main poll loop
     loop {
-        info!("polling for work...");
         // Check shutdown before polling
         if shutdown.load(Ordering::SeqCst) {
             do_shutdown(&client, &manager_session_id).await;
             return Ok(());
         }
+
+        // Periodically check if the OAuth access token needs refreshing.
+        if last_oauth_check.elapsed() >= std::time::Duration::from_secs(60) {
+            last_oauth_check = std::time::Instant::now();
+            let mut c = client.lock().await;
+            // Re-read from disk first (another session may have refreshed it).
+            if let Err(e) = c.reload_access_token() {
+                warn!(err = %e, "failed to reload access token from disk");
+            }
+            if c.token_ttl_ms() < OAUTH_REFRESH_MARGIN_MS {
+                info!(ttl_ms = c.token_ttl_ms(), "OAuth token near expiry, triggering refresh");
+                drop(c);
+                refresh_oauth_token().await;
+                let mut c = client.lock().await;
+                if let Err(e) = c.reload_access_token() {
+                    warn!(err = %e, "failed to reload access token after refresh");
+                } else {
+                    info!(ttl_ms = c.token_ttl_ms(), "OAuth token reloaded after refresh");
+                }
+            }
+        }
+
+        info!("polling for work...");
 
         let item = {
             let c = client.lock().await;
@@ -397,6 +424,30 @@ async fn main() -> anyhow::Result<()> {
             do_shutdown(&client, &manager_session_id).await;
             return Ok(());
         }
+
+        // SSE stream dropped — archive the old session and create a fresh one
+        // so the poll loop picks up a new work item.
+        {
+            let c = client.lock().await;
+            if let Some(ref sid) = manager_session_id {
+                if let Err(e) = c.archive_session(sid).await {
+                    warn!(err = %e, "failed to archive old session");
+                } else {
+                    info!(session_id = %sid, "archived old session after SSE drop");
+                }
+            }
+            match c.create_session(&session_name).await {
+                Ok(id) => {
+                    info!(session_id = %id, "created replacement session");
+                    manager_session_id = Some(id);
+                }
+                Err(e) => {
+                    error!(err = %e, "failed to create replacement session — exiting for restart");
+                    do_shutdown(&client, &None).await;
+                    return Ok(());
+                }
+            }
+        }
     }
 }
 
@@ -539,5 +590,33 @@ async fn send_welcome(
         let _ = c
             .register_worker(session_url, worker_jwt, worker_epoch)
             .await;
+    }
+}
+
+/// Shell out to `claude` to trigger its internal OAuth token refresh.
+///
+/// Claude Code refreshes `~/.claude/.credentials.json` when the token is
+/// near-expiry. We make a trivial API call so it goes through its auth flow,
+/// then the daemon can re-read the refreshed token from disk.
+async fn refresh_oauth_token() {
+    info!("invoking claude to refresh OAuth token");
+    match tokio::process::Command::new("claude")
+        .args(["-p", "hi", "--max-turns", "1"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await
+    {
+        Ok(status) => {
+            if status.success() {
+                info!("claude token refresh invocation succeeded");
+            } else {
+                warn!(code = ?status.code(), "claude token refresh exited non-zero");
+            }
+        }
+        Err(e) => {
+            warn!(err = %e, "failed to invoke claude for token refresh");
+        }
     }
 }

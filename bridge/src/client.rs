@@ -64,6 +64,16 @@ impl BridgeClient {
         &self.config.org_uuid
     }
 
+    /// Re-read the OAuth access token from disk, updating the config in place.
+    pub fn reload_access_token(&mut self) -> Result<(), crate::config::ConfigError> {
+        self.config.reload_access_token()
+    }
+
+    /// Milliseconds until the OAuth access token expires.
+    pub fn token_ttl_ms(&self) -> u64 {
+        self.config.token_ttl_ms()
+    }
+
     pub fn base_url(&self) -> &str {
         &self.config.base_url
     }
@@ -138,9 +148,10 @@ impl BridgeClient {
             return Err(ClientError::Api { status, body });
         }
 
-        // An empty body or 204 means no work.
+        // An empty body, 204, or JSON null means no work.
         let text = resp.text().await?;
-        if text.trim().is_empty() {
+        let trimmed = text.trim();
+        if trimmed.is_empty() || trimmed == "null" {
             return Ok(None);
         }
 
@@ -600,6 +611,7 @@ mod tests {
             base_url: "https://api.anthropic.com".to_string(),
             access_token: "test-token".to_string(),
             org_uuid: "org-123".to_string(),
+            expires_at_ms: None,
         };
         let client = BridgeClient::new(config);
         let h = client.full_headers("my-secret");
@@ -632,6 +644,7 @@ mod tests {
             base_url: "https://api.anthropic.com".to_string(),
             access_token: "test-token".to_string(),
             org_uuid: "org-123".to_string(),
+            expires_at_ms: None,
         };
         let client = BridgeClient::new(config);
         let h = client.simple_headers("worker-jwt");
@@ -647,5 +660,34 @@ mod tests {
         assert!(h.get("anthropic-beta").is_none());
         assert!(h.get("x-environment-runner-version").is_none());
         assert!(h.get("x-organization-uuid").is_none());
+    }
+
+    #[test]
+    fn token_ttl_ms_delegates_to_config() {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let config = BridgeConfig {
+            base_url: "https://api.anthropic.com".to_string(),
+            access_token: "test-token".to_string(),
+            org_uuid: "org-123".to_string(),
+            expires_at_ms: Some(now_ms + 60_000),
+        };
+        let client = BridgeClient::new(config);
+        let ttl = client.token_ttl_ms();
+        assert!(ttl > 55_000 && ttl <= 60_000, "ttl={ttl}");
+    }
+
+    #[test]
+    fn token_ttl_ms_zero_when_no_expiry() {
+        let config = BridgeConfig {
+            base_url: "https://api.anthropic.com".to_string(),
+            access_token: "test-token".to_string(),
+            org_uuid: "org-123".to_string(),
+            expires_at_ms: None,
+        };
+        let client = BridgeClient::new(config);
+        assert_eq!(client.token_ttl_ms(), 0);
     }
 }
