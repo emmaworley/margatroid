@@ -117,55 +117,63 @@ fn cmd_list() -> String {
 
 fn parse_start(parts: &[&str]) -> String {
     if parts.len() < 3 {
-        return "Usage: `/start <name> <--image=IMAGE|--host>`\n\n\
+        return "Usage: `/start <name> <--image=IMAGE|--host> [--skip-permissions]`\n\n\
                 Examples:\n\
                 - `/start myproject --image=ubuntu`\n\
                 - `/start myproject --image=node:22`\n\
-                - `/start myproject --host`"
+                - `/start myproject --host`\n\
+                - `/start myproject --image=ubuntu --skip-permissions`"
             .to_string();
     }
     let name = parts[1];
     if !is_valid_session_name(name) {
         return "Invalid name: use only letters, numbers, hyphens, underscores.".to_string();
     }
-    // Look for --image= or --host in remaining args
+    // Look for --image=, --host, --skip-permissions in remaining args
     let mut image: Option<&str> = None;
     let mut host = false;
+    let mut skip_permissions = false;
     for &part in &parts[2..] {
         if let Some(img) = part.strip_prefix("--image=") {
             image = Some(img);
         } else if part == "--host" {
             host = true;
+        } else if part == "--skip-permissions" {
+            skip_permissions = true;
         }
     }
     if host {
-        cmd_start(name, "host")
+        cmd_start(name, "host", skip_permissions)
     } else if let Some(img) = image {
         if img.is_empty() {
             return "Usage: `--image=IMAGE` requires a value".to_string();
         }
-        cmd_start(name, img)
+        cmd_start(name, img, skip_permissions)
     } else {
-        "Usage: `/start <name> <--image=IMAGE|--host>`".to_string()
+        "Usage: `/start <name> <--image=IMAGE|--host> [--skip-permissions]`".to_string()
     }
 }
 
-fn cmd_start(name: &str, image: &str) -> String {
+fn cmd_start(name: &str, image: &str, skip_permissions: bool) -> String {
     // Setup and register (don't exec — we're a daemon)
     match session::setup(name, image) {
         Ok(_) => {}
         Err(e) => return format!("Setup failed: {e}"),
     }
 
-    if let Err(e) = margatroid::state::register(name, image) {
+    if let Err(e) = margatroid::state::register_with_options(name, image, skip_permissions) {
         return format!("Registration failed: {e}");
     }
 
     // Launch in a new tmux window
     let tui_bin = margatroid::margatroid_dir().join("bin/margatroid-tui");
     let tui_path = tui_bin.to_string_lossy().into_owned();
+    let mut args: Vec<&str> = vec![&tui_path, name, image];
+    if skip_permissions {
+        args.push("--skip-permissions");
+    }
 
-    match margatroid::tmux::new_window(name, &[&tui_path, name, image]) {
+    match margatroid::tmux::new_window(name, &args) {
         Ok(_) => format!("Started session `{name}` with image `{image}`"),
         Err(e) => format!("Failed to start: {e}"),
     }
@@ -210,7 +218,7 @@ fn cmd_info(name: &str) -> String {
                     let container = s.container_id.as_deref().unwrap_or("none");
                     let uuid = s.last_uuid.as_deref().unwrap_or("none");
 
-                    format!(
+                    let mut info = format!(
                         "## Session: {}\n\n\
                          - **Image**: {}\n\
                          - **Status**: {}\n\
@@ -223,7 +231,11 @@ fn cmd_info(name: &str) -> String {
                         container,
                         s.session_dir.display(),
                         uuid,
-                    )
+                    );
+                    if s.skip_permissions {
+                        info.push_str("\n- **Permissions**: skipped");
+                    }
+                    info
                 }
                 None => format!("Session `{name}` not found"),
             }
@@ -246,6 +258,7 @@ fn help_text() -> String {
      | `/list` | List all sessions |\n\
      | `/start <name> --image=IMAGE` | Start a containerized session |\n\
      | `/start <name> --host` | Start an uncontainerized session |\n\
+     | `  --skip-permissions` | Skip all permission checks |\n\
      | `/stop <name>` | Stop a running session |\n\
      | `/restart <name>` | Restart a session |\n\
      | `/rename <old> <new>` | Rename a stopped session |\n\
@@ -377,5 +390,17 @@ mod tests {
     fn whitespace_trimmed() {
         let result = handle_command("  /help  ");
         assert!(result.contains("Commands"));
+    }
+
+    #[test]
+    fn help_shows_skip_permissions() {
+        let result = handle_command("/help");
+        assert!(result.contains("skip-permissions"));
+    }
+
+    #[test]
+    fn start_usage_shows_skip_permissions() {
+        let result = handle_command("/start");
+        assert!(result.contains("--skip-permissions"));
     }
 }

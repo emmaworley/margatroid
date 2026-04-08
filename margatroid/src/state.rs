@@ -10,6 +10,9 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionInfo {
     pub image: String,
+    /// When true, Claude Code runs with --dangerously-skip-permissions.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub skip_permissions: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -91,12 +94,18 @@ where
 
 /// Register a session (creates or updates). Holds flock.
 pub fn register(name: &str, image: &str) -> Result<()> {
+    register_with_options(name, image, false)
+}
+
+/// Register a session with all options. Holds flock.
+pub fn register_with_options(name: &str, image: &str, skip_permissions: bool) -> Result<()> {
     with_lock(|| {
         let mut sessions = load()?;
         sessions.insert(
             name.to_string(),
             SessionInfo {
                 image: image.to_string(),
+                skip_permissions,
             },
         );
         save_inner(&sessions)?;
@@ -125,12 +134,14 @@ mod tests {
             "test-session".to_string(),
             SessionInfo {
                 image: "ubuntu".to_string(),
+                skip_permissions: false,
             },
         );
         sessions.insert(
             "another".to_string(),
             SessionInfo {
                 image: "debian".to_string(),
+                skip_permissions: false,
             },
         );
 
@@ -157,5 +168,58 @@ mod tests {
         assert_eq!(parsed.len(), 2);
         assert_eq!(parsed["daily-briefings"].image, "ubuntu");
         assert_eq!(parsed["librarian"].image, "node");
+    }
+
+    #[test]
+    fn skip_permissions_defaults_false() {
+        // Existing sessions.json without skip_permissions should deserialize with default false
+        let json = r#"{"mysession": {"image": "ubuntu"}}"#;
+        let parsed: HashMap<String, SessionInfo> = serde_json::from_str(json).unwrap();
+        assert!(!parsed["mysession"].skip_permissions);
+    }
+
+    #[test]
+    fn skip_permissions_roundtrip() {
+        let mut sessions = HashMap::new();
+        sessions.insert(
+            "permissive".to_string(),
+            SessionInfo {
+                image: "ubuntu".to_string(),
+                skip_permissions: true,
+            },
+        );
+        sessions.insert(
+            "normal".to_string(),
+            SessionInfo {
+                image: "ubuntu".to_string(),
+                skip_permissions: false,
+            },
+        );
+
+        let json = serde_json::to_string_pretty(&sessions).unwrap();
+        let parsed: HashMap<String, SessionInfo> = serde_json::from_str(&json).unwrap();
+
+        assert!(parsed["permissive"].skip_permissions);
+        assert!(!parsed["normal"].skip_permissions);
+    }
+
+    #[test]
+    fn skip_permissions_omitted_when_false() {
+        let info = SessionInfo {
+            image: "ubuntu".to_string(),
+            skip_permissions: false,
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(!json.contains("skip_permissions"), "false should be omitted: {json}");
+    }
+
+    #[test]
+    fn skip_permissions_present_when_true() {
+        let info = SessionInfo {
+            image: "ubuntu".to_string(),
+            skip_permissions: true,
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("skip_permissions"), "true should be present: {json}");
     }
 }

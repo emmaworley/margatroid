@@ -19,6 +19,7 @@ pub struct Session {
     pub container_id: Option<String>,
     pub session_dir: PathBuf,
     pub last_uuid: Option<String>,
+    pub skip_permissions: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -73,6 +74,7 @@ pub fn list_all() -> Result<Vec<Session>> {
                 container_id,
                 session_dir,
                 last_uuid,
+                skip_permissions: info.skip_permissions,
             },
         );
     }
@@ -114,6 +116,7 @@ pub fn list_all() -> Result<Vec<Session>> {
                         container_id,
                         session_dir,
                         last_uuid,
+                        skip_permissions: false,
                     },
                 );
             }
@@ -136,15 +139,20 @@ pub fn setup(name: &str, image: &str) -> Result<PathBuf> {
 
 /// Full launch sequence: setup, register, rename tmux window, fork helper, exec into podman.
 /// This function does NOT return on success (it execs into podman or claude).
-pub fn launch(name: &str, image_input: &str, inject_resume: bool) -> Result<()> {
-    tracing::info!(name, image = image_input, "launching session");
+pub fn launch(
+    name: &str,
+    image_input: &str,
+    inject_resume: bool,
+    skip_permissions: bool,
+) -> Result<()> {
+    tracing::info!(name, image = image_input, skip_permissions, "launching session");
 
     let session_dir = setup(name, image_input)?;
     tracing::debug!(dir = %session_dir.display(), "session directory ready");
 
     let resolved_image = image::resolve(image_input);
 
-    state::register(name, image_input)?;
+    state::register_with_options(name, image_input, skip_permissions)?;
 
     // Rename tmux window
     if let Ok(pane_id) = std::env::var("TMUX_PANE") {
@@ -171,6 +179,9 @@ pub fn launch(name: &str, image_input: &str, inject_resume: bool) -> Result<()> 
     let session_name = format!("{user}@{hostname}: {name}");
 
     let mut claude_args = vec!["--name".to_string(), session_name];
+    if skip_permissions {
+        claude_args.push("--dangerously-skip-permissions".to_string());
+    }
 
     let should_inject = match &resume_action {
         discovery::ResumeAction::Fresh => {
@@ -275,19 +286,24 @@ pub fn stop(name: &str) -> Result<()> {
 
 /// Restart a session: stop the container, then launch in a new tmux window.
 pub fn restart(name: &str) -> Result<()> {
-    // Get the image from saved state
+    // Get the image and options from saved state
     let sessions = state::load()?;
-    let image = sessions
-        .get(name)
+    let info = sessions.get(name);
+    let image = info
         .map(|i| i.image.clone())
         .unwrap_or_else(|| "ubuntu".to_string());
+    let skip_permissions = info.map(|i| i.skip_permissions).unwrap_or(false);
 
     stop(name)?;
 
     // Launch in a new tmux window
     let tui_bin = margatroid_dir().join("bin/margatroid-tui");
     let tui_path = tui_bin.to_string_lossy().into_owned();
-    tmux::new_window(name, &[&tui_path, name, &image])?;
+    let mut args = vec![tui_path.as_str(), name, image.as_str()];
+    if skip_permissions {
+        args.push("--skip-permissions");
+    }
+    tmux::new_window(name, &args)?;
 
     Ok(())
 }
@@ -325,6 +341,7 @@ pub fn rename(old_name: &str, new_name: &str) -> Result<()> {
         SessionError::Other(format!("Session `{old_name}` not found"))
     })?;
     let image = info.image.clone();
+    let skip_permissions = info.skip_permissions;
 
     // Check the new name isn't taken.
     if sessions.contains_key(new_name) {
@@ -351,7 +368,7 @@ pub fn rename(old_name: &str, new_name: &str) -> Result<()> {
 
     // Update state: deregister old, register new.
     state::deregister(old_name)?;
-    state::register(new_name, &image)?;
+    state::register_with_options(new_name, &image, skip_permissions)?;
 
     // Update the margatroid block in CLAUDE.md with the new name.
     // The upsert will replace the existing block, preserving user content.

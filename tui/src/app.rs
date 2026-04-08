@@ -127,7 +127,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let tui_bin = margatroid::margatroid_dir().join("bin/margatroid-tui");
                 let tui_path = tui_bin.to_string_lossy().into_owned();
 
-                if let Err(e) = margatroid::tmux::new_window(&name, &[&tui_path, &name, &image]) {
+                if let Err(e) = margatroid::tmux::new_window(&name, &[tui_path.as_str(), name.as_str(), image.as_str()]) {
                     disable_raw_mode()?;
                     return Err(format!("Failed to start: {e}").into());
                 }
