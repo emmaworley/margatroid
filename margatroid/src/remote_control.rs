@@ -29,9 +29,25 @@ pub fn fork_helper(
             // Detach from parent's session
             let _ = nix::unistd::setsid();
 
+            // Redirect stdin/stdout/stderr to /dev/null. The parent's PTY is
+            // shared with the relay/podman/Claude process, so any writes by
+            // this helper (e.g. tracing logs) would corrupt Claude's terminal
+            // output. Tracing init in helper_main will install a no-op
+            // subscriber too, but redirect FDs as a belt-and-braces measure.
+            if let Ok(devnull) = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open("/dev/null")
+            {
+                use std::os::unix::io::AsRawFd;
+                let null_fd = devnull.as_raw_fd();
+                let _ = nix::unistd::dup2(null_fd, 0);
+                let _ = nix::unistd::dup2(null_fd, 1);
+                let _ = nix::unistd::dup2(null_fd, 2);
+            }
+
             // Close inherited file descriptors (3..1024) to avoid leaking
             // lock files and network connections from the parent process.
-            // FDs 0-2 are stdin/stdout/stderr which we keep.
             for fd in 3..1024 {
                 let _ = nix::unistd::close(fd);
             }
@@ -58,10 +74,15 @@ fn helper_main(name: &str, inject_resume: bool, skip_permissions: bool) {
     if skip_permissions {
         // Claude shows a "Bypass Permissions" confirmation prompt with
         // "No, exit" selected by default. Navigate Down to "Yes, I accept"
-        // then press Enter.
+        // then press Enter. The keys must be sent in separate calls with
+        // a delay; sending Down+Enter in one tmux send-keys call delivers
+        // them too fast for Claude's React UI to process the Down before
+        // Enter arrives, resulting in Enter being applied to the still-
+        // default "No, exit" option.
         if wait_for_text(&target, "Enter to confirm", Duration::from_secs(60)) {
-            tracing::info!("accepting bypass permissions confirmation for {name}");
-            let _ = tmux::send_keys(&target, &["Down", "Enter"]);
+            let _ = tmux::send_keys(&target, &["Down"]);
+            thread::sleep(Duration::from_millis(200));
+            let _ = tmux::send_keys(&target, &["Enter"]);
         }
     }
 
