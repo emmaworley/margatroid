@@ -133,5 +133,3 @@ This session is managed by margatroid. It may be stopped and restarted
 automatically (e.g. during updates). In-memory state (running processes,
 environment variables) is not preserved across restarts.
 <!-- margatroid:end -->
-
-

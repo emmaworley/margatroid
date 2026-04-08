@@ -94,6 +94,10 @@ pub fn build_run_command(
     cmd.args(["-e", &format!("LOGNAME={name}")]);
     cmd.args(["-e", "SHELL=/bin/bash"]);
     cmd.args(["-e", "DISABLE_AUTOUPDATER=1"]);
+    // Tell Claude Code this is a sandbox so it allows --permission-mode
+    // bypassPermissions despite running as root (podman rootless maps UID 0
+    // inside → host user outside, so root in the container is safe).
+    cmd.args(["-e", "IS_SANDBOX=1"]);
 
     // Working directory
     cmd.arg(format!("-w={c_home}"));

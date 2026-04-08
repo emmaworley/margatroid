@@ -208,7 +208,7 @@ pub fn launch(
     eprintln!();
 
     // Fork remote-control helper
-    remote_control::fork_helper(name, inject_resume || should_inject)?;
+    remote_control::fork_helper(name, inject_resume || should_inject, skip_permissions)?;
     tracing::debug!(name, "remote-control helper forked");
 
     // Build the inner command (what the relay will fork/exec).

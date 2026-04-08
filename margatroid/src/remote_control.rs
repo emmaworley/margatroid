@@ -13,11 +13,13 @@ pub enum RemoteControlError {
 
 /// Fork a background helper process that:
 /// 1. Waits for the prompt to appear in the tmux pane
-/// 2. Optionally sends a resume prompt
-/// 3. Sends /remote-control
+/// 2. Optionally accepts the bypass-permissions confirmation
+/// 3. Optionally sends a resume prompt
+/// 4. Sends /remote-control
 pub fn fork_helper(
     name: &str,
     inject_resume: bool,
+    skip_permissions: bool,
 ) -> Result<(), RemoteControlError> {
     let name = name.to_string();
 
@@ -43,15 +45,25 @@ pub fn fork_helper(
                 .ok();
             }
 
-            helper_main(&name, inject_resume);
+            helper_main(&name, inject_resume, skip_permissions);
             std::process::exit(0);
         }
         Err(e) => Err(RemoteControlError::Fork(e.to_string())),
     }
 }
 
-fn helper_main(name: &str, inject_resume: bool) {
+fn helper_main(name: &str, inject_resume: bool, skip_permissions: bool) {
     let target = format!("{TMUX_SESSION}:{name}");
+
+    if skip_permissions {
+        // Claude shows a "Bypass Permissions" confirmation prompt with
+        // "No, exit" selected by default. Navigate Down to "Yes, I accept"
+        // then press Enter.
+        if wait_for_text(&target, "Enter to confirm", Duration::from_secs(60)) {
+            tracing::info!("accepting bypass permissions confirmation for {name}");
+            let _ = tmux::send_keys(&target, &["Down", "Enter"]);
+        }
+    }
 
     // Wait for the prompt (up to 2 minutes)
     let settled = wait_for_prompt(&target, Duration::from_secs(120));
@@ -81,11 +93,15 @@ fn helper_main(name: &str, inject_resume: bool) {
 }
 
 fn wait_for_prompt(target: &str, timeout: Duration) -> bool {
+    wait_for_text(target, "❯", timeout)
+}
+
+fn wait_for_text(target: &str, needle: &str, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         thread::sleep(Duration::from_secs(2));
         if let Ok(content) = tmux::capture_pane(target) {
-            if content.contains('\u{276f}') || content.contains('❯') {
+            if content.contains(needle) {
                 return true;
             }
         }
