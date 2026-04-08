@@ -216,9 +216,11 @@ fn write_claude_md(
             content.find(MARGATROID_BLOCK_START),
             content.find(MARGATROID_BLOCK_END),
         ) {
-            // Replace existing block.
+            // Replace existing block. Strip leading newlines from `after` to
+            // prevent accumulating extra blank lines on repeated upserts
+            // (the block template already includes a trailing newline).
             let before = &content[..start];
-            let after = &content[end + MARGATROID_BLOCK_END.len()..];
+            let after = content[end + MARGATROID_BLOCK_END.len()..].trim_start_matches('\n');
             let new_content = format!("{before}{block}{after}");
             fs::write(&claude_md, new_content)?;
         } else {
@@ -278,6 +280,41 @@ mod tests {
         assert!(content3.contains("Custom instructions"));
         assert!(content3.contains("updated"));
         assert!(content3.contains("debian"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_claude_md_no_newline_accumulation() {
+        let dir =
+            std::env::temp_dir().join(format!("orch-test-claude-md-nl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Write initial, then upsert several times
+        write_claude_md(&dir, "test", "ubuntu", false, "/home/test").unwrap();
+        let content1 = std::fs::read_to_string(dir.join("CLAUDE.md")).unwrap();
+
+        write_claude_md(&dir, "test", "ubuntu", false, "/home/test").unwrap();
+        let content2 = std::fs::read_to_string(dir.join("CLAUDE.md")).unwrap();
+
+        write_claude_md(&dir, "test", "ubuntu", false, "/home/test").unwrap();
+        let content3 = std::fs::read_to_string(dir.join("CLAUDE.md")).unwrap();
+
+        // Content should be identical after repeated upserts (idempotent)
+        assert_eq!(content1, content2, "second upsert changed content");
+        assert_eq!(content2, content3, "third upsert changed content");
+
+        // Also verify with user content before the block
+        let with_user = format!("# My Project\n\nNotes here.\n\n{content1}");
+        std::fs::write(dir.join("CLAUDE.md"), &with_user).unwrap();
+
+        write_claude_md(&dir, "test", "ubuntu", false, "/home/test").unwrap();
+        let after1 = std::fs::read_to_string(dir.join("CLAUDE.md")).unwrap();
+
+        write_claude_md(&dir, "test", "ubuntu", false, "/home/test").unwrap();
+        let after2 = std::fs::read_to_string(dir.join("CLAUDE.md")).unwrap();
+
+        assert_eq!(after1, after2, "upsert with user content is not idempotent");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
