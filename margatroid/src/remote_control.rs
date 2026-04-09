@@ -12,14 +12,16 @@ pub enum RemoteControlError {
 }
 
 /// Fork a background helper process that:
-/// 1. Waits for the prompt to appear in the tmux pane
-/// 2. Optionally accepts the bypass-permissions confirmation
-/// 3. Optionally sends a resume prompt
-/// 4. Sends /remote-control
+/// 1. Optionally accepts the "Resume from summary" prompt (when `is_resume`)
+/// 2. Optionally accepts the bypass-permissions confirmation (when `skip_permissions`)
+/// 3. Waits for the prompt to appear in the tmux pane
+/// 4. Optionally sends a resume prompt (when `inject_resume`)
+/// 5. Sends /remote-control
 pub fn fork_helper(
     name: &str,
     inject_resume: bool,
     skip_permissions: bool,
+    is_resume: bool,
 ) -> Result<(), RemoteControlError> {
     let name = name.to_string();
 
@@ -61,15 +63,33 @@ pub fn fork_helper(
                 .ok();
             }
 
-            helper_main(&name, inject_resume, skip_permissions);
+            helper_main(&name, inject_resume, skip_permissions, is_resume);
             std::process::exit(0);
         }
         Err(e) => Err(RemoteControlError::Fork(e.to_string())),
     }
 }
 
-fn helper_main(name: &str, inject_resume: bool, skip_permissions: bool) {
+fn helper_main(name: &str, inject_resume: bool, skip_permissions: bool, is_resume: bool) {
     let target = format!("{TMUX_SESSION}:{name}");
+
+    if is_resume {
+        // When resuming an old session, Claude Code may show a "Resume from
+        // summary (recommended)" prompt asking whether to resume from summary
+        // or the full session. Option 1 ("Resume from summary (recommended)")
+        // is selected by default, so we just need to press Enter to confirm.
+        // This prompt only appears for large/old sessions, so we use a short
+        // timeout — if it doesn't appear, move on to the next step.
+        //
+        // The distinctive needle "Resume from summary" avoids matching the
+        // bypass permissions prompt (which also contains "Enter to confirm").
+        if wait_for_text(&target, "Resume from summary", Duration::from_secs(15)) {
+            let _ = tmux::send_keys(&target, &["Enter"]);
+            // Give Claude a beat to process the selection and clear the
+            // prompt before we start looking for the next one.
+            thread::sleep(Duration::from_millis(500));
+        }
+    }
 
     if skip_permissions {
         // Claude shows a "Bypass Permissions" confirmation prompt with

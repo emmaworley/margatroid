@@ -33,21 +33,18 @@ async fn main() -> anyhow::Result<()> {
         .map(|h| h.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "unknown".into());
 
-    // Register as bridge environment
+    // Before the first API call, make sure the OAuth access token on disk is
+    // fresh. The daemon previously crash-looped overnight because the token
+    // would expire, register() would fail with 401, main() would return, and
+    // systemd would restart it — but the in-loop refresh logic never got to
+    // run. Refresh proactively here so startup survives an expired token.
+    ensure_fresh_oauth_token(&client).await;
+
+    // Register as bridge environment. If the first attempt returns 401 (e.g.
+    // the proactive refresh above failed or raced), force a refresh and retry
+    // once before giving up.
     info!(machine = %hostname, "registering bridge environment");
-    {
-        let mut c = client.lock().await;
-        c.register(RegisterRequest {
-            machine_name: hostname.clone(),
-            directory: std::env::var("HOME").unwrap_or_else(|_| "/home/claude".into()),
-            branch: None,
-            git_repo_url: None,
-            max_sessions: 1,
-            metadata: Some(serde_json::json!({ "worker_type": "margatroid-daemon" })),
-            environment_id: None,
-        })
-        .await?;
-    }
+    register_environment(&client, &hostname).await?;
 
     // Create session with a durable, recognizable name
     let user = std::env::var("USER").unwrap_or_else(|_| "unknown".into());
@@ -101,22 +98,7 @@ async fn main() -> anyhow::Result<()> {
         // Periodically check if the OAuth access token needs refreshing.
         if last_oauth_check.elapsed() >= std::time::Duration::from_secs(60) {
             last_oauth_check = std::time::Instant::now();
-            let mut c = client.lock().await;
-            // Re-read from disk first (another session may have refreshed it).
-            if let Err(e) = c.reload_access_token() {
-                warn!(err = %e, "failed to reload access token from disk");
-            }
-            if c.token_ttl_ms() < OAUTH_REFRESH_MARGIN_MS {
-                info!(ttl_ms = c.token_ttl_ms(), "OAuth token near expiry, triggering refresh");
-                drop(c);
-                refresh_oauth_token().await;
-                let mut c = client.lock().await;
-                if let Err(e) = c.reload_access_token() {
-                    warn!(err = %e, "failed to reload access token after refresh");
-                } else {
-                    info!(ttl_ms = c.token_ttl_ms(), "OAuth token reloaded after refresh");
-                }
-            }
+            ensure_fresh_oauth_token(&client).await;
         }
 
         info!("polling for work...");
@@ -590,6 +572,71 @@ async fn send_welcome(
         let _ = c
             .register_worker(session_url, worker_jwt, worker_epoch)
             .await;
+    }
+}
+
+/// Reload the OAuth access token from disk and, if it is within the refresh
+/// margin of expiry (or already expired), shell out to `claude` to refresh it
+/// and reload again.
+///
+/// Safe to call repeatedly — this is a no-op when the on-disk token is fresh.
+async fn ensure_fresh_oauth_token(client: &Arc<Mutex<BridgeClient>>) {
+    let mut c = client.lock().await;
+    // Re-read from disk first (another process may have refreshed it).
+    if let Err(e) = c.reload_access_token() {
+        warn!(err = %e, "failed to reload access token from disk");
+    }
+    let ttl = c.token_ttl_ms();
+    if ttl >= OAUTH_REFRESH_MARGIN_MS {
+        return;
+    }
+    info!(ttl_ms = ttl, "OAuth token near/past expiry, triggering refresh");
+    drop(c);
+    refresh_oauth_token().await;
+    let mut c = client.lock().await;
+    if let Err(e) = c.reload_access_token() {
+        warn!(err = %e, "failed to reload access token after refresh");
+    } else {
+        info!(ttl_ms = c.token_ttl_ms(), "OAuth token reloaded after refresh");
+    }
+}
+
+/// Register as a bridge environment. Retries once with a forced token refresh
+/// if the first attempt returns 401 — otherwise returns the error.
+async fn register_environment(
+    client: &Arc<Mutex<BridgeClient>>,
+    hostname: &str,
+) -> anyhow::Result<()> {
+    let make_req = || RegisterRequest {
+        machine_name: hostname.to_string(),
+        directory: std::env::var("HOME").unwrap_or_else(|_| "/home/claude".into()),
+        branch: None,
+        git_repo_url: None,
+        max_sessions: 1,
+        metadata: Some(serde_json::json!({ "worker_type": "margatroid-daemon" })),
+        environment_id: None,
+    };
+
+    let first = {
+        let mut c = client.lock().await;
+        c.register(make_req()).await
+    };
+    match first {
+        Ok(_) => Ok(()),
+        Err(bridge::client::ClientError::Api { status: 401, body }) => {
+            warn!(body = %body, "register returned 401, forcing token refresh and retrying");
+            refresh_oauth_token().await;
+            {
+                let mut c = client.lock().await;
+                if let Err(e) = c.reload_access_token() {
+                    warn!(err = %e, "failed to reload access token after forced refresh");
+                }
+            }
+            let mut c = client.lock().await;
+            c.register(make_req()).await?;
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
     }
 }
 

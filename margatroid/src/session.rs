@@ -205,10 +205,15 @@ pub fn launch(
             true
         }
     };
+    // True whenever we're passing --resume to Claude Code (either clean or
+    // interrupted). Used by the helper to look for — and auto-accept — the
+    // "Resume from summary (recommended)" prompt that appears for large/old
+    // resumed sessions.
+    let is_resume = !matches!(resume_action, discovery::ResumeAction::Fresh);
     eprintln!();
 
     // Fork remote-control helper
-    remote_control::fork_helper(name, inject_resume || should_inject, skip_permissions)?;
+    remote_control::fork_helper(name, inject_resume || should_inject, skip_permissions, is_resume)?;
     tracing::debug!(name, "remote-control helper forked");
 
     // Build the inner command (what the relay will fork/exec).
