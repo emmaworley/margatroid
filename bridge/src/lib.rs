@@ -22,6 +22,7 @@
 
 pub mod client;
 pub mod config;
+pub mod oauth;
 pub mod sse;
 pub mod types;
 

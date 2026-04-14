@@ -640,30 +640,23 @@ async fn register_environment(
     }
 }
 
-/// Shell out to `claude` to trigger its internal OAuth token refresh.
+/// Refresh `~/.claude/.credentials.json` by calling Claude's OAuth token
+/// endpoint directly.
 ///
-/// Claude Code refreshes `~/.claude/.credentials.json` when the token is
-/// near-expiry. We make a trivial API call so it goes through its auth flow,
-/// then the daemon can re-read the refreshed token from disk.
+/// We previously shelled out to `claude -p hi --max-turns 1` on the theory
+/// that it would trigger Claude Code's built-in refresh flow, but in practice
+/// that command exits non-zero when the token is already expired and does
+/// not rewrite the credentials file — so the daemon crash-looped overnight
+/// with a stale token. Calling the OAuth endpoint ourselves removes that
+/// dependency entirely.
 async fn refresh_oauth_token() {
-    info!("invoking claude to refresh OAuth token");
-    match tokio::process::Command::new("claude")
-        .args(["-p", "hi", "--max-turns", "1"])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await
-    {
-        Ok(status) => {
-            if status.success() {
-                info!("claude token refresh invocation succeeded");
-            } else {
-                warn!(code = ?status.code(), "claude token refresh exited non-zero");
-            }
+    info!("refreshing OAuth token via platform.claude.com");
+    match bridge::oauth::refresh_credentials().await {
+        Ok(expires_at_ms) => {
+            info!(expires_at_ms, "OAuth credentials refreshed");
         }
         Err(e) => {
-            warn!(err = %e, "failed to invoke claude for token refresh");
+            warn!(err = %e, "OAuth refresh failed");
         }
     }
 }
